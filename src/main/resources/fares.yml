@@ -1,0 +1,25 @@
+
+fares:
+  # Used when no specific route is configured
+  default-fare: 3.00
+
+  # Fare for entering and exiting the same station
+  same-station-fare: 0.00
+
+  # Use the reverse fare if only one direction is listed
+  reverse-routes: true
+
+  # Maximum permitted journey duration
+  maximum-journey-minutes: 180
+
+  # Minimum card balance required at entry
+  minimum-entry-balance: 0.00
+
+  # Example fares in GBP
+  routes:
+    sylvcentral:
+      sylvairport: 5.50
+      moonlake: 2.80
+
+    sylvairport:
+      moonlake: 4.20

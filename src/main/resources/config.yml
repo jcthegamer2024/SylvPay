@@ -1,0 +1,145 @@
+
+# ==========================================
+# SYLVPAY CONFIGURATION
+# ==========================================
+
+currency:
+  symbol: "£"
+  position: "before"
+  decimals: 2
+  thousands-separator: true
+  space: false
+
+# ==========================================
+# TICKET MACHINE GUI
+# ==========================================
+
+gui:
+  title: "<dark_gray>SylvPay Ticket Machine"
+  topup-title: "<dark_gray>Top Up Your Card"
+
+  custom:
+    enabled: false
+    glyph: "sylvpay_machine"
+    topup-glyph: "sylvpay_topup"
+    shift: "<shift:-8>"
+    prefix: "<!italic><!bold><white>"
+    suffix: ""
+
+# ==========================================
+# TAP2GO CARD
+# ==========================================
+
+card:
+  material: PAPER
+  item-model: "sylvpay:tap2go_card"
+  name: "<gold><bold>SylvPay Tap2Go"
+  lore:
+    - "<gray>Card ID: <white>{id}"
+    - "<dark_gray>Top up at any ticket machine."
+  price: 2.5
+  buy-options: [5, 10, 25, 50]
+
+topup-options: [5, 10, 25, 50]
+max-balance: 1000
+
+# ==========================================
+# TICKET MACHINE BUTTONS
+# ==========================================
+
+buttons:
+  buy:
+    material: PAPER
+    item-model: "sylvpay:tap2go_card"
+    name: "<gold>Buy Card <gray>(preload <green>{amount}<gray>)"
+    lore:
+      - "<gray>Card: <white>{price}"
+      - "<gray>Preload: <white>{amount}"
+      - "<gray>Total: <green>{total}"
+
+  balance:
+    material: CLOCK
+    item-model: ""
+    name: "<aqua>Check Balance"
+    lore:
+      - "<gray>Uses the card in your inventory."
+
+  topup:
+    material: EMERALD
+    item-model: ""
+    name: "<green>Top Up Card"
+    lore:
+      - "<gray>Add money from your balance."
+
+  refund:
+    material: REDSTONE
+    item-model: ""
+    name: "<red>Refund Card"
+    lore:
+      - "<gray>Takes your card and returns"
+      - "<gray>its balance to your account."
+
+  topup-amount:
+    material: GOLD_INGOT
+    item-model: ""
+    name: "<green>Add <white>{amount}"
+    lore:
+      - "<gray>Click to top up."
+
+  back:
+    material: ARROW
+    item-model: ""
+    name: "<gray>Back"
+    lore: []
+
+# ==========================================
+# GENERAL MESSAGES
+# ==========================================
+
+messages:
+  prefix: "<gold>[SylvPay] </gold>"
+  no-card: "<red>You don't have a SylvPay card in your inventory."
+  not-enough-money: "<red>You can't afford that. You need {amount}."
+  bought: "<green>Bought card <white>{id}</white> with <white>{balance}</white> preloaded."
+  balance: "<gray>Card <white>{id}</white> balance: <green>{balance}"
+  topped-up: "<green>Added <white>{amount}</white>. New balance: <white>{balance}"
+  max-balance: "<red>That would exceed the max card balance of {max}."
+  refunded: "<green>Card <white>{id}</white> refunded. You received <white>{amount}</white>."
+  invalid-card: "<red>That card is no longer valid."
+  error: "<red>Something went wrong. Tell an admin."
+  no-permission: "<red>You don't have permission."
+  players-only: "Only players can use this."
+  reloaded: "<green>Config reloaded."
+
+# ==========================================
+# NEXO FARE GATES
+# ==========================================
+
+faregates:
+  enabled: false
+
+  # Change these to your own Nexo IDs.
+  # The closed model must be Nexo furniture.
+  models:
+    closed: "sylv_faregate_closed"
+    open: "sylv_faregate_open"
+
+  tap-cooldown-ms: 1500
+
+  opening:
+    timeout-ticks: 100
+    crossing-radius: 1.5
+
+  # All messages support MiniMessage.
+  messages:
+    tap-in: "<green>✔ Tapped into <gold>{station}</gold>"
+    tap-out: "<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}"
+    no-card: "<red>Hold your Tap2Go card to tap."
+    invalid-card: "<red>This card is invalid."
+    already-in: "<red>This card already has an active journey. Tap out first."
+    no-journey: "<red>You must tap in before tapping out."
+    insufficient-balance: "<red>Insufficient card balance. Balance: {balance}"
+    journey-expired: "<red>Journey expired. Contact staff to resolve it."
+    busy: "<yellow>This gate is in use."
+    model-missing: "<red>Open gate Nexo item ID not found."
+    error: "<red>Unable to process the tap. Contact staff."

@@ -1,0 +1,16 @@
+
+# SylvPay station definitions
+# IDs are used in gate commands and fares.yml.
+
+stations:
+  sylvcentral:
+    name: "Sylvarion Central"
+    zone: 1
+
+  sylvairport:
+    name: "Sylvarion Airport"
+    zone: 3
+
+  moonlake:
+    name: "Moon Lake"
+    zone: 2

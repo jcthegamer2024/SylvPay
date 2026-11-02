@@ -1,0 +1,23 @@
+
+name: SylvPay
+version: '1.0.0'
+main: org.sylvarion.sylvpay.SylvPayMain
+api-version: '26.1'
+description: Tap2Go ticket machine, fare gates and journey management
+
+dependencies:
+  server:
+    Vault:
+      load: BEFORE
+      required: true
+      join-classpath: true
+
+    CMI:
+      load: BEFORE
+      required: false
+      join-classpath: true
+
+    Nexo:
+      load: BEFORE
+      required: true
+      join-classpath: true
