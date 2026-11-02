@@ -2,9 +2,7 @@
 
 **Tap2Go transport payment and fare-gate system for Sylvarion City**, built as a Java plugin for a **Paper Minecraft 26.3** server.
 
-SylvPay combines reloadable station and fare configuration, persistent Tap2Go smart cards, an inventory-based ticket machine, and Nexo furniture fare gates. It is designed for a city roleplay server rather than a real payment network.
-
-> **Development status:** Active development / beta. The features below describe the current source files and updates; test thoroughly before using on a production server.
+SylvPay combines reloadable station and fare configuration, persistent Tap2Go smart cards, an inventory-based ticket machine, and Nexo furniture fare gates. 
 
 ## Features
 
