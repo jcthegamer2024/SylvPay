@@ -4,12 +4,22 @@ plugins {
     id("xyz.jpenilla.run-paper") version "2.3.0"
 }
 
+// ==========================================
+// SYLVPAY VERSION
+// Change this for each new release.
+// ==========================================
+
+group = "org.sylvarion.sylvpay"
+version = "0.2.0-beta"
+
+base {
+    archivesName.set("SylvPay")
+}
+
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
     maven("https://jitpack.io")
-
-    // Official Nexo Maven repository
     maven("https://repo.nexomc.com/releases")
 }
 
@@ -27,7 +37,7 @@ dependencies {
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
 tasks {
@@ -37,8 +47,11 @@ tasks {
     }
 
     processResources {
-        val props = mapOf("version" to version)
-        filesMatching("paper-plugin.yml") {
+        val props = mapOf("version" to project.version.toString())
+
+        inputs.properties(props)
+
+        filesMatching("plugin.yml") {
             expand(props)
         }
     }

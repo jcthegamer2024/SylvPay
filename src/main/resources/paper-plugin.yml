@@ -1,6 +1,6 @@
 
 name: SylvPay
-version: '1.0.0'
+version: '${version}'
 main: org.sylvarion.sylvpay.SylvPayMain
 api-version: '26.1'
 description: Tap2Go ticket machine, fare gates and journey management
