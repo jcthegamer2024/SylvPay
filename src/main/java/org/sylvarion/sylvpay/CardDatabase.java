@@ -4,12 +4,16 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.sql.*;
 import java.util.UUID;
+import java.util.List;
+import java.util.ArrayList;
 
 /** SQLite card balances and persistent journeys. All state-changing operations are synchronized. */
 public final class CardDatabase {
     public record Journey(String origin, long startedAt) {}
     public enum TapStatus { OK, INVALID_CARD, ALREADY_IN, NO_JOURNEY, INSUFFICIENT, EXPIRED }
     public record TapResult(TapStatus status, String origin, double fare, double balance) {}
+    public record HistoryEntry(String kind, String origin, String destination,
+                               long startedAt, long endedAt, double amount) {}
     private final String url;
     public CardDatabase(JavaPlugin plugin) {
         plugin.getDataFolder().mkdirs();
@@ -22,14 +26,24 @@ public final class CardDatabase {
             s.executeUpdate("CREATE TABLE IF NOT EXISTS cards (id TEXT PRIMARY KEY, owner_uuid TEXT NOT NULL, balance REAL NOT NULL, created_at INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS journeys (card_id TEXT PRIMARY KEY, origin TEXT NOT NULL, started_at INTEGER NOT NULL)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS journey_history (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL, origin TEXT NOT NULL, destination TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, fare REAL NOT NULL)");
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS card_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL, occurred_at INTEGER NOT NULL)");
         }
     }
     public synchronized String createCard(UUID owner, double balance) throws SQLException {
         for (int attempt = 0; attempt < 10; attempt++) {
             String id = "SP-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
-            try (Connection c = connect(); PreparedStatement ps = c.prepareStatement("INSERT OR IGNORE INTO cards (id,owner_uuid,balance,created_at) VALUES (?,?,?,?)")) {
-                ps.setString(1,id); ps.setString(2,owner.toString()); ps.setDouble(3,balance); ps.setLong(4,System.currentTimeMillis());
-                if (ps.executeUpdate() == 1) return id;
+            try (Connection c = connect()) {
+                c.setAutoCommit(false);
+                try (PreparedStatement ps = c.prepareStatement("INSERT OR IGNORE INTO cards (id,owner_uuid,balance,created_at) VALUES (?,?,?,?)")) {
+                    ps.setString(1, id); ps.setString(2, owner.toString());
+                    ps.setDouble(3, balance); ps.setLong(4, System.currentTimeMillis());
+                    if (ps.executeUpdate() == 1) {
+                        insertTransaction(c, id, "ISSUED", balance);
+                        c.commit();
+                        return id;
+                    }
+                    c.rollback();
+                } catch (SQLException ex) { c.rollback(); throw ex; }
             }
         }
         throw new SQLException("Unable to allocate card ID");
@@ -42,10 +56,18 @@ public final class CardDatabase {
     }
     public synchronized boolean addBalance(String id, double amount) throws SQLException {
         if (!Double.isFinite(amount) || amount <= 0) return false;
-        try (Connection c = connect(); PreparedStatement ps = c.prepareStatement("UPDATE cards SET balance=ROUND(balance+?,2) WHERE id=? AND active=1")) {
-            ps.setDouble(1,amount); ps.setString(2,id); return ps.executeUpdate()==1;
+        try (Connection c = connect()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement("UPDATE cards SET balance=ROUND(balance+?,2) WHERE id=? AND active=1")) {
+                ps.setDouble(1, amount); ps.setString(2, id);
+                if (ps.executeUpdate() != 1) { c.rollback(); return false; }
+                insertTransaction(c, id, "TOPUP", amount);
+                c.commit();
+                return true;
+            } catch (SQLException ex) { c.rollback(); throw ex; }
         }
     }
+
     /** Refunding an active journey's card is disallowed, preventing stranded journeys. */
     public synchronized Double closeCard(String id) throws SQLException {
         try (Connection c = connect()) {
@@ -57,6 +79,7 @@ public final class CardDatabase {
                 try (PreparedStatement ps=c.prepareStatement("UPDATE cards SET active=0,balance=0 WHERE id=? AND active=1")) {
                     ps.setString(1,id); if(ps.executeUpdate()!=1) { c.rollback(); return null; }
                 }
+                insertTransaction(c, id, "REFUND", balance);
                 c.commit(); return balance;
             } catch(SQLException e) { c.rollback(); throw e; }
         }
@@ -114,4 +137,36 @@ public final class CardDatabase {
     public synchronized Journey activeJourney(String id) throws SQLException {
         try(Connection c=connect()){return readJourney(c,id);}
     }
+    private void insertTransaction(Connection c, String id, String kind, double amount) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO card_transactions(card_id,kind,amount,occurred_at) VALUES(?,?,?,?)")) {
+            ps.setString(1, id); ps.setString(2, kind); ps.setDouble(3, amount);
+            ps.setLong(4, System.currentTimeMillis()); ps.executeUpdate();
+        }
+    }
+
+    private void recordTransaction(String id, String kind, double amount) throws SQLException {
+        try (Connection c = connect()) { insertTransaction(c, id, kind, amount); }
+    }
+
+    public synchronized List<HistoryEntry> history(String cardId, int page, int pageSize) throws SQLException {
+        int size = Math.max(1, Math.min(pageSize, 45));
+        int offset = Math.max(0, page) * size;
+        String sql = "SELECT 'JOURNEY' AS kind, origin, destination, started_at AS started, " +
+                "ended_at AS ended, fare AS amount FROM journey_history WHERE card_id=? " +
+                "UNION ALL SELECT kind, NULL, NULL, occurred_at, occurred_at, amount " +
+                "FROM card_transactions WHERE card_id=? ORDER BY ended DESC LIMIT ? OFFSET ?";
+        List<HistoryEntry> entries = new ArrayList<>();
+        try (Connection c = connect(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, cardId); ps.setString(2, cardId);
+            ps.setInt(3, size); ps.setInt(4, offset);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) entries.add(new HistoryEntry(rs.getString("kind"),
+                        rs.getString("origin"), rs.getString("destination"),
+                        rs.getLong("started"), rs.getLong("ended"), rs.getDouble("amount")));
+            }
+        }
+        return entries;
+    }
+
 }

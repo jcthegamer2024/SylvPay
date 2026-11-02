@@ -1,8 +1,9 @@
-
 package org.sylvarion.sylvpay;
 
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.SoundCategory;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -11,148 +12,98 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.io.IOException;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.sql.SQLException;
 import java.util.*;
 
+/** Nexo-managed, two-furniture fare gates. */
 public final class FareGateManager implements Listener {
-
-    private record OpenGate(
-            ItemDisplay entity,
-            ItemStack original,
-            UUID rider,
-            boolean near
-    ) {}
+    private static final class OpenGate {
+        ItemDisplay display;
+        final UUID rider;
+        final double approachX, approachZ;
+        final double axisX, axisZ;
+        boolean entered;
+        OpenGate(ItemDisplay display, Player rider) {
+            this.display = display;
+            this.rider = rider.getUniqueId();
+            Location centre = display.getLocation();
+            Location start = rider.getLocation();
+            this.approachX = start.getX() - centre.getX();
+            this.approachZ = start.getZ() - centre.getZ();
+            double length = Math.hypot(approachX, approachZ);
+            // Direction from gate towards the tapping passenger.
+            // This makes detection independent of the model's yaw convention.
+            if (length < 0.25) {
+                double radians = Math.toRadians(centre.getYaw());
+                this.axisX = -Math.sin(radians);
+                this.axisZ = Math.cos(radians);
+            } else {
+                this.axisX = approachX / length;
+                this.axisZ = approachZ / length;
+            }
+        }
+    }
 
     private final SylvPayMain plugin;
     private final StationManager stations;
     private final FareManager fares;
     private final NexoGateBridge nexo;
-
     private final Map<UUID, OpenGate> open = new HashMap<>();
     private final Map<UUID, Long> lastTap = new HashMap<>();
-
     private final MiniMessage mm = MiniMessage.miniMessage();
 
-    public FareGateManager(
-            SylvPayMain plugin,
-            StationManager stations,
-            FareManager fares,
-            NexoGateBridge nexo
-    ) {
-        this.plugin = plugin;
-        this.stations = stations;
-        this.fares = fares;
-        this.nexo = nexo;
+    public FareGateManager(SylvPayMain plugin, StationManager stations, FareManager fares, NexoGateBridge nexo) {
+        this.plugin = plugin; this.stations = stations; this.fares = fares; this.nexo = nexo;
+    }
+
+    private String closedId() { return plugin.getConfig().getString("faregates.models.closed", "sylv_faregate_closed"); }
+    private String openId() { return plugin.getConfig().getString("faregates.models.open", "sylv_faregate_open"); }
+
+    public boolean isManaged(ItemDisplay display) {
+        return display != null && stations.gate(display) != null;
     }
 
     public boolean tap(Player player, ItemDisplay gate) {
-
-        if (!plugin.getConfig().getBoolean("faregates.enabled", false)) {
-            return false;
-        }
-
+        if (!plugin.getConfig().getBoolean("faregates.enabled", false)) return false;
         StationManager.Gate assigned = stations.gate(gate);
-
-        if (assigned == null) {
-            return false;
-        }
-
+        if (assigned == null) return false;
         String station = assigned.station();
-        UUID gateId = gate.getUniqueId();
-
-        if (open.containsKey(gateId)) {
+        if (open.containsKey(gate.getUniqueId()) || !closedId().equals(nexo.furnitureId(gate))) {
             message(player, "busy", station, null, 0, 0);
             return true;
         }
-
         ItemStack held = player.getInventory().getItemInMainHand();
-
-        String card = held.hasItemMeta()
-                ? held.getItemMeta().getPersistentDataContainer()
-                .get(plugin.cardKey(), PersistentDataType.STRING)
-                : null;
-
-        if (card == null) {
-            message(player, "no-card", station, null, 0, 0);
-            return true;
-        }
-
+        String card = held.hasItemMeta() ? held.getItemMeta().getPersistentDataContainer()
+                .get(plugin.cardKey(), PersistentDataType.STRING) : null;
+        if (card == null) { message(player, "no-card", station, null, 0, 0); return true; }
         long now = System.currentTimeMillis();
-
-        long cooldown = plugin.getConfig().getLong(
-                "faregates.tap-cooldown-ms",
-                1500
-        );
-
-        if (now - lastTap.getOrDefault(player.getUniqueId(), 0L) < cooldown) {
-            return true;
-        }
-
+        long cooldown = plugin.getConfig().getLong("faregates.tap-cooldown-ms", 1500);
+        if (now - lastTap.getOrDefault(player.getUniqueId(), 0L) < cooldown) return true;
         lastTap.put(player.getUniqueId(), now);
-
-        String openId = plugin.getConfig().getString(
-                "faregates.models.open",
-                ""
-        );
-
-        String closedId = plugin.getConfig().getString(
-                "faregates.models.closed",
-                ""
-        );
-
-        ItemStack openVisual = nexo.item(openId);
-        ItemStack closedVisual = nexo.item(closedId);
-
-        if (openVisual == null || closedVisual == null) {
-            message(player, "model-missing", station, null, 0, 0);
-            return true;
+        if (!nexo.exists(openId()) || !nexo.exists(closedId())) {
+            message(player, "model-missing", station, null, 0, 0); return true;
         }
-
         try {
-
             CardDatabase.TapResult result;
-
             if (assigned.direction().equals("entrance")) {
-
-                result = plugin.db().tapIn(
-                        card,
-                        station,
-                        fares.minimumEntryBalance()
-                );
-
+                result = plugin.db().tapIn(card, station, fares.minimumEntryBalance());
             } else {
-
-                CardDatabase.Journey journey =
-                        plugin.db().activeJourney(card);
-
+                CardDatabase.Journey journey = plugin.db().activeJourney(card);
                 if (journey == null) {
-
-                    if (plugin.db().getBalance(card) == null) {
-                        message(player, "invalid-card", station, null, 0, 0);
-                    } else {
-                        message(player, "no-journey", station, null, 0, 0);
-                    }
-
+                    message(player, plugin.db().getBalance(card) == null ? "invalid-card" : "no-journey",
+                            station, null, 0, 0);
                     return true;
                 }
-
                 if (!stations.hasStation(journey.origin())) {
-                    message(player, "error", station, null, 0, 0);
-                    return true;
+                    message(player, "error", station, null, 0, 0); return true;
                 }
-
-                double fare = fares.fare(journey.origin(), station);
-
-                result = plugin.db().tapOut(
-                        card,
-                        station,
-                        fare,
-                        fares.maxJourneyMillis()
-                );
+                result = plugin.db().tapOut(card, station, fares.fare(journey.origin(), station),
+                        fares.maxJourneyMillis());
             }
-
             if (result.status() != CardDatabase.TapStatus.OK) {
-
                 String key = switch (result.status()) {
                     case INVALID_CARD -> "invalid-card";
                     case ALREADY_IN -> "already-in";
@@ -161,227 +112,184 @@ public final class FareGateManager implements Listener {
                     case EXPIRED -> "journey-expired";
                     default -> "error";
                 };
-
-                message(
-                        player,
-                        key,
-                        station,
-                        result.origin(),
-                        result.fare(),
-                        result.balance()
-                );
-
+                message(player, key, station, result.origin(), result.fare(), result.balance());
                 return true;
             }
-
-            // Save the original display item as a fallback.
-            ItemStack original = gate.getItemStack().clone();
-
-            // Change to the open Nexo model.
-            gate.setItemStack(openVisual.clone());
-
-            open.put(
-                    gateId,
-                    new OpenGate(
-                            gate,
-                            original,
-                            player.getUniqueId(),
-                            false
-                    )
-            );
-
-            long ticks = Math.max(
-                    20L,
-                    plugin.getConfig().getLong(
-                            "faregates.opening.timeout-ticks",
-                            100
-                    )
-            );
-
-            Bukkit.getScheduler().runTaskLater(
-                    plugin,
-                    () -> close(gateId),
-                    ticks
-            );
-
-            message(
-                    player,
-                    assigned.direction().equals("entrance")
-                            ? "tap-in"
-                            : "tap-out",
-                    station,
-                    result.origin(),
-                    result.fare(),
-                    result.balance()
-            );
-
+            UUID oldUuid = gate.getUniqueId();
+            Location oldPosition = gate.getLocation().clone();
+            ItemDisplay opened = nexo.replace(gate, openId());
+            if (opened == null) {
+                // Best-effort restore; journey was already recorded, so alert administrators.
+                ItemDisplay restored = nexo.place(closedId(), oldPosition);
+                if (restored != null) transferSafely(oldUuid, restored.getUniqueId());
+                plugin.getLogger().severe("Gate failed to open AFTER card transaction for " + card +
+                        ". Review the journey manually.");
+                message(player, "error", station, null, 0, 0);
+                return true;
+            }
+            if (!transferSafely(oldUuid, opened.getUniqueId())) {
+                // Keep tracking in memory even if persistence fails; do not leave an open gate untracked.
+                plugin.getLogger().severe("Gate UUID assignment could not be persisted; gate " + opened.getUniqueId());
+            }
+            long timeout = Math.max(20L, plugin.getConfig().getLong("faregates.opening.timeout-ticks", 100));
+            UUID openUuid = opened.getUniqueId();
+            OpenGate state = new OpenGate(opened, player);
+            open.put(openUuid, state);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), timeout);
+            boolean entrance = assigned.direction().equals("entrance");
+            message(player, entrance ? "tap-in" : "tap-out",
+                    station, result.origin(), result.fare(), result.balance());
+            playTapSound(player, entrance);
             return true;
-
         } catch (SQLException | IllegalArgumentException ex) {
-
-            plugin.getLogger().severe(
-                    "Fare gate transaction failed: " + ex.getMessage()
-            );
-
+            plugin.getLogger().severe("Fare gate transaction failed: " + ex);
             message(player, "error", station, null, 0, 0);
             return true;
         }
     }
 
+    private boolean transferSafely(UUID from, UUID to) {
+        try { stations.transfer(from, to); return true; }
+        catch (IOException | IllegalArgumentException ex) {
+            plugin.getLogger().severe("Could not transfer gate assignment: " + ex);
+            return false;
+        }
+    }
+
+    /**
+     * Detect the tapping passenger travelling from their original side to the far
+     * side of the gate. The timeout remains a fallback if they never cross.
+     */
     @EventHandler
     public void onMove(PlayerMoveEvent event) {
-
-        if (event.getTo() == null) {
-            return;
-        }
-
-        if (event.getFrom().getX() == event.getTo().getX()
-                && event.getFrom().getY() == event.getTo().getY()
-                && event.getFrom().getZ() == event.getTo().getZ()) {
-            return;
-        }
-
+        Location to = event.getTo();
+        if (to == null || (event.getFrom().getX() == to.getX()
+                && event.getFrom().getY() == to.getY()
+                && event.getFrom().getZ() == to.getZ())) return;
         Player player = event.getPlayer();
-
-        double radius = Math.max(
-                0.5,
-                plugin.getConfig().getDouble(
-                        "faregates.opening.crossing-radius",
-                        1.5
-                )
-        );
-
+        double clear = Math.max(0.65, plugin.getConfig().getDouble(
+                "faregates.opening.clearance-radius", 0.85));
+        double lane = Math.max(0.5, plugin.getConfig().getDouble(
+                "faregates.opening.lane-half-width", 1.0));
         for (var entry : new HashMap<>(open).entrySet()) {
-
             OpenGate state = entry.getValue();
-
-            if (!state.rider().equals(player.getUniqueId())) {
-                continue;
-            }
-
-            if (!state.entity().isValid()) {
-                continue;
-            }
-
-            if (!state.entity().getWorld().equals(player.getWorld())) {
-                continue;
-            }
-
-            boolean near =
-                    state.entity().getLocation()
-                            .distanceSquared(player.getLocation())
-                            <= radius * radius;
-
-            if (near && !state.near()) {
-
-                open.put(
-                        entry.getKey(),
-                        new OpenGate(
-                                state.entity(),
-                                state.original(),
-                                state.rider(),
-                                true
-                        )
-                );
-
-            } else if (!near && state.near()) {
-
-                close(entry.getKey());
+            if (!state.rider.equals(player.getUniqueId()) || !state.display.isValid()
+                    || !state.display.getWorld().equals(to.getWorld())) continue;
+            Location centre = state.display.getLocation();
+            double dx = to.getX() - centre.getX();
+            double dz = to.getZ() - centre.getZ();
+            // Positive is the side from which the rider tapped.
+            double longitudinal = dx * state.axisX + dz * state.axisZ;
+            double lateral = Math.abs(-dx * state.axisZ + dz * state.axisX);
+            if (lateral > lane) continue;
+            if (Math.abs(longitudinal) < clear) state.entered = true;
+            // Crossing must be observed, and rider must clear the barrier footprint.
+            if (state.entered && longitudinal < -clear) {
+                attemptClose(entry.getKey());
             }
         }
     }
 
-    public void close(UUID id) {
+    /** Only the actual barrier footprint, not the whole approach area, blocks closing. */
+    private boolean occupied(ItemDisplay display) {
+        double radius = Math.max(0.5, plugin.getConfig().getDouble(
+                "faregates.opening.clearance-radius", 0.85));
+        Location centre = display.getLocation();
+        for (Player player : display.getWorld().getPlayers()) {
+            Location position = player.getLocation();
+            if (Math.abs(position.getY() - centre.getY()) > 2.0) continue;
+            double dx = position.getX() - centre.getX();
+            double dz = position.getZ() - centre.getZ();
+            if (dx * dx + dz * dz <= radius * radius) return true;
+        }
+        return false;
+    }
 
-        OpenGate state = open.remove(id);
-
-        if (state == null) {
+    private void attemptClose(UUID openUuid) {
+        OpenGate state = open.get(openUuid);
+        if (state == null) return;
+        if (!state.display.isValid()) { open.remove(openUuid); return; }
+        if (occupied(state.display)) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 20L);
             return;
         }
-
-        ItemDisplay entity = state.entity();
-
-        if (!entity.isValid()) {
-            return;
+        Location location = state.display.getLocation().clone();
+        ItemDisplay closed = nexo.replace(state.display, closedId());
+        if (closed == null) {
+            // Try to restore a closed gate if Nexo removed the open one.
+            closed = nexo.place(closedId(), location);
+            if (closed == null) {
+                plugin.getLogger().severe("CRITICAL: Could not close fare gate at " + location);
+                Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 40L);
+                return;
+            }
         }
-
-        // Rebuild the CLOSED model from its Nexo ID.
-        String closedId = plugin.getConfig().getString(
-                "faregates.models.closed",
-                ""
-        );
-
-        ItemStack closedVisual = nexo.item(closedId);
-
-        if (closedVisual != null) {
-
-            entity.setItemStack(closedVisual.clone());
-
-            plugin.getLogger().info(
-                    "Fare gate " + id + " restored to Nexo model: " + closedId
-            );
-
-        } else {
-
-            // Fallback to the original display item.
-            entity.setItemStack(state.original().clone());
-
-            plugin.getLogger().warning(
-                    "Could not rebuild closed Nexo model '" + closedId
-                            + "'. Restored original display item."
-            );
-        }
+        transferSafely(openUuid, closed.getUniqueId());
+        open.remove(openUuid);
     }
 
     public void shutdown() {
+        // Server is shutting down: best-effort restore open gates immediately.
+        for (var entry : new HashMap<>(open).entrySet()) {
+            OpenGate state = entry.getValue();
+            if (!state.display.isValid()) continue;
+            Location location = state.display.getLocation().clone();
+            ItemDisplay closed = nexo.replace(state.display, closedId());
+            if (closed == null) closed = nexo.place(closedId(), location);
+            if (closed != null) transferSafely(entry.getKey(), closed.getUniqueId());
+        }
+        open.clear();
+    }
 
-        for (UUID id : new ArrayList<>(open.keySet())) {
-            close(id);
+    private String formatMoney(double amount) {
+        String symbol = plugin.getConfig().getString("currency.symbol", "£");
+        String position = plugin.getConfig().getString("currency.position", "before");
+        int decimals = Math.max(0, Math.min(8, plugin.getConfig().getInt("currency.decimals", 2)));
+        boolean grouping = plugin.getConfig().getBoolean("currency.thousands-separator", true);
+        String spacing = plugin.getConfig().getBoolean("currency.space", false) ? " " : "";
+
+        DecimalFormat format = new DecimalFormat();
+        format.setDecimalFormatSymbols(DecimalFormatSymbols.getInstance(Locale.UK));
+        format.setGroupingUsed(grouping);
+        format.setMinimumFractionDigits(decimals);
+        format.setMaximumFractionDigits(decimals);
+        String number = format.format(amount);
+
+        return "after".equalsIgnoreCase(position)
+                ? number + spacing + symbol
+                : symbol + spacing + number;
+    }
+
+    private void playTapSound(Player player, boolean entrance) {
+        String path = entrance ? "faregates.sounds.tap-in" : "faregates.sounds.tap-out";
+        if (!plugin.getConfig().getBoolean(path + ".enabled", true)) return;
+
+        String sound = plugin.getConfig().getString(path + ".sound", "minecraft:block.note_block.bell");
+        if (sound == null || sound.isBlank()) return;
+        float volume = (float) Math.max(0.0, plugin.getConfig().getDouble(path + ".volume", 0.8));
+        float pitch = (float) Math.max(0.5, Math.min(2.0,
+                plugin.getConfig().getDouble(path + ".pitch", entrance ? 1.4 : 1.0)));
+        try {
+            player.playSound(player.getLocation(), sound, SoundCategory.MASTER, volume, pitch);
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid fare gate sound '" + sound + "' at " + path + ": " + ex.getMessage());
         }
     }
 
-    private void message(
-            Player player,
-            String key,
-            String station,
-            String origin,
-            double fare,
-            double balance
-    ) {
+    private String zoneLabel(String station) {
+        if (station == null || !stations.hasStation(station)) return "Unknown";
+        Integer zone = stations.stationZone(station);
+        return zone == null ? "Unknown" : Integer.toString(zone);
+    }
 
-        String template = plugin.getConfig().getString(
-                "faregates.messages." + key,
-                "<red>Fare gate error."
-        );
-
-        String formatted = String.format(
-                Locale.UK,
-                "£%.2f",
-                fare
-        );
-
-        String money = String.format(
-                Locale.UK,
-                "£%.2f",
-                balance
-        );
-
-        player.sendMessage(
-                mm.deserialize(
-                        template
-                                .replace(
-                                        "{station}",
-                                        stations.stationName(station)
-                                )
-                                .replace(
-                                        "{origin}",
-                                        origin == null
-                                                ? ""
-                                                : stations.stationName(origin)
-                                )
-                                .replace("{fare}", formatted)
-                                .replace("{balance}", money)
-                )
-        );
+    private void message(Player player, String key, String station, String origin, double fare, double balance) {
+        String template = plugin.getConfig().getString("faregates.messages." + key, "<red>Fare gate error.");
+        player.sendMessage(mm.deserialize(template
+                .replace("{station}", stations.stationName(station))
+                .replace("{zone}", zoneLabel(station))
+                .replace("{origin_zone}", zoneLabel(origin))
+                .replace("{origin}", origin == null ? "" : stations.stationName(origin))
+                .replace("{fare}", formatMoney(fare))
+                .replace("{balance}", formatMoney(balance))));
     }
 }

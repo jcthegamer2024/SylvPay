@@ -1,90 +1,94 @@
 package org.sylvarion.sylvpay;
 
+import com.nexomc.nexo.api.NexoFurniture;
+import com.nexomc.nexo.api.events.furniture.NexoFurnitureInteractEvent;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
-import org.bukkit.event.Event;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.EquipmentSlot;
+import java.io.IOException;
 
-import java.lang.reflect.Method;
-
-/** Nexo integration via its published runtime API. No Nexo classes are bundled into SylvPay. */
-public final class NexoGateBridge {
+/** All Nexo integration uses its published public Java API. */
+public final class NexoGateBridge implements Listener {
     private final SylvPayMain plugin;
-    private Class<?> furnitureApi;
-    private Class<?> itemsApi;
+    private FareGateManager gates;
 
     public NexoGateBridge(SylvPayMain plugin) { this.plugin = plugin; }
 
-    @SuppressWarnings("unchecked")
-    public boolean register(FareGateManager gates) {
-        if (Bukkit.getPluginManager().getPlugin("Nexo") == null) return false;
-        try {
-            ClassLoader nexoLoader = Bukkit.getPluginManager().getPlugin("Nexo").getClass().getClassLoader();
-            furnitureApi = nexoLoader.loadClass("com.nexomc.nexo.api.NexoFurniture");
-            itemsApi = nexoLoader.loadClass("com.nexomc.nexo.api.NexoItems");
-            Class<? extends Event> eventType = (Class<? extends Event>) nexoLoader.loadClass(
-                    "com.nexomc.nexo.api.events.furniture.NexoFurnitureInteractEvent");
-            Listener marker = new Listener() {};
-            Bukkit.getPluginManager().registerEvent(eventType, marker, EventPriority.NORMAL,
-                    (listener, event) -> {
-                        try {
-                            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
-                            Object hand = event.getClass().getMethod("getHand").invoke(event);
-                            if (!"HAND".equals(hand.toString())) return;
-                            ItemDisplay display = (ItemDisplay) event.getClass().getMethod("getBaseEntity").invoke(event);
-                            if (gates.tap(player, display)) {
-                                event.getClass().getMethod("setCancelled", boolean.class).invoke(event, true);
-                            }
-                        } catch (ReflectiveOperationException ex) {
-                            plugin.getLogger().warning("Nexo tap event failed: " + ex.getMessage());
-                        }
-                    }, plugin, true);
-            plugin.getLogger().info("Nexo fare-gate interaction integration registered.");
-            return true;
-        } catch (ReflectiveOperationException | LinkageError ex) {
-            plugin.getLogger().severe("Nexo API incompatible: " + ex.getMessage());
-            return false;
+    public boolean register(FareGateManager manager) {
+        if (!Bukkit.getPluginManager().isPluginEnabled("Nexo")) return false;
+        gates = manager;
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+        return true;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInteract(NexoFurnitureInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        ItemDisplay display = event.getBaseEntity();
+        if (!gates.isManaged(display)) {
+            // Only consider the configured closed gate furniture, never arbitrary Nexo items.
+            String closed = plugin.getConfig().getString("faregates.models.closed", "sylv_faregate_closed");
+            if (!closed.equals(furnitureId(display))) return;
+            try {
+                if (!plugin.stations().recoverAt(display)) return;
+            } catch (IOException ex) {
+                plugin.getLogger().severe("Could not recover replaced fare gate: " + ex.getMessage());
+                return;
+            }
         }
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+        // Don't mutate Nexo furniture from inside its own interaction event.
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline() && display.isValid()) gates.tap(player, display);
+        });
     }
 
     public ItemDisplay target(Player player) {
-        if (furnitureApi == null) return null;
-        try {
-            Object value = furnitureApi.getMethod("findTargetFurniture", Player.class).invoke(null, player);
-            if (!(value instanceof ItemDisplay display)) return null;
-            if (display.getLocation().distanceSquared(player.getEyeLocation()) > 36) return null;
-            return display;
-        } catch (ReflectiveOperationException | IllegalArgumentException ex) {
-            plugin.getLogger().warning("Could not find target Nexo furniture: " + ex.getMessage());
-            return null;
-        }
+        ItemDisplay display = NexoFurniture.findTargetFurniture(player);
+        if (display == null || !display.isValid()) return null;
+        if (!display.getWorld().equals(player.getWorld()) ||
+                display.getLocation().distanceSquared(player.getEyeLocation()) > 36) return null;
+        return display;
     }
 
     public String furnitureId(ItemDisplay display) {
-        if (furnitureApi == null) return null;
-        try {
-            Object mechanic = furnitureApi.getMethod("furnitureMechanic", org.bukkit.entity.Entity.class).invoke(null, display);
-            if (mechanic == null) return null;
-            return (String) mechanic.getClass().getMethod("getItemID").invoke(mechanic);
-        } catch (ReflectiveOperationException ex) {
-            plugin.getLogger().warning("Could not read Nexo furniture ID: " + ex.getMessage());
-            return null;
-        }
+        if (display == null || !display.isValid()) return null;
+        var mechanic = NexoFurniture.furnitureMechanic(display);
+        return mechanic == null ? null : mechanic.getItemID();
     }
 
-    /** Build a visual ItemStack from a Nexo item ID. It does NOT replace the furniture entity. */
-    public ItemStack item(String id) {
-        if (itemsApi == null || id == null || id.isBlank()) return null;
+    public boolean exists(String id) {
+        return id != null && !id.isBlank() && NexoFurniture.isFurniture(id);
+    }
+
+    /** Use Nexo removal and placement, so Nexo manages the collision blocks itself. */
+    public ItemDisplay replace(ItemDisplay previous, String replacementId) {
+        if (previous == null || !previous.isValid() || !exists(replacementId)) return null;
+        Location position = previous.getLocation().clone();
+        if (!NexoFurniture.remove(previous)) return null;
         try {
-            Object builder = itemsApi.getMethod("itemFromId", String.class).invoke(null, id);
-            if (builder == null) return null;
-            Method build = builder.getClass().getMethod("build");
-            return (ItemStack) build.invoke(builder);
-        } catch (ReflectiveOperationException ex) {
-            plugin.getLogger().warning("Could not build Nexo item '" + id + "': " + ex.getMessage());
+            ItemDisplay placed = NexoFurniture.place(replacementId, position, position.getYaw(), BlockFace.UP);
+            if (placed != null) return placed;
+        } catch (RuntimeException ex) {
+            plugin.getLogger().severe("Nexo placement failed: " + ex);
+        }
+        plugin.getLogger().severe("Furniture removed, but replacement could not be placed at " + position);
+        return null;
+    }
+
+    public ItemDisplay place(String id, Location location) {
+        if (!exists(id)) return null;
+        try {
+            return NexoFurniture.place(id, location, location.getYaw(), BlockFace.UP);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().severe("Nexo placement failed: " + ex);
             return null;
         }
     }
