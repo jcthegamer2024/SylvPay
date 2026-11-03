@@ -30,7 +30,7 @@ import java.util.Locale;
 
 public final class MachineGui implements Listener {
 
-    private enum Type { MAIN, CREATE, TOPUP, HISTORY, REFUND_CONFIRM }
+    private enum Type { MAIN, INSERT, CREATE, TOPUP, HISTORY, REFUND_CONFIRM }
 
     private static final class MachineHolder implements InventoryHolder {
         final Type type;
@@ -47,6 +47,7 @@ public final class MachineGui implements Listener {
 
     private static final int[] OPTION_SLOTS = {10, 11, 12, 13};
     private static final int SLOT_CARD = 4;
+    private static final int SLOT_INSERT = 13;
     private static final int SLOT_BALANCE = 15;
     private static final int SLOT_TOPUP = 16;
     private static final int SLOT_REFUND = 17;
@@ -171,7 +172,7 @@ public final class MachineGui implements Listener {
     private void slot(MachineHolder holder) {
         holder.inventory.setItem(SLOT_CARD, holder.card == null
                 ? simple(Material.GRAY_STAINED_GLASS_PANE, "<yellow>Insert Tap2Go card",
-                "<gray>Click a card in your inventory", "<gray>to insert it here")
+                "<gray>Click to open the card reader", "<gray>Then drag a card into its slot")
                 : holder.card.clone());
     }
 
@@ -180,6 +181,16 @@ public final class MachineGui implements Listener {
         ItemStack card = old.card;
         old.card = null;
         Bukkit.getScheduler().runTask(plugin, () -> open(p, type, card, page));
+    }
+
+    // Paper/Bukkit: update the cursor through HumanEntity rather than the
+    // deprecated InventoryClickEvent#setCursor. Schedule after the inventory
+    // event so the server finishes processing the cancelled click/drag first.
+    private void updateCursorNextTick(Player player, ItemStack item) {
+        ItemStack copy = item == null ? null : item.clone();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) player.setItemOnCursor(copy);
+        });
     }
 
     private void returnCard(Player p, MachineHolder holder) {
@@ -226,6 +237,7 @@ public final class MachineGui implements Listener {
         int size = (type == Type.CREATE || type == Type.TOPUP) ? 54 : type == Type.HISTORY ? 45 : 27;
         Component title = switch (type) {
             case MAIN -> guiTitle(false);
+            case INSERT -> text(cfg().getString("gui.insert-title", "<dark_gray>Insert Tap2Go Card"));
             case CREATE -> text(cfg().getString("gui.create-title", "<dark_gray>Create Tap2Go Card"));
             case TOPUP -> guiTitle(true);
             case HISTORY -> text("<dark_gray>Tap2Go Transaction History");
@@ -233,17 +245,22 @@ public final class MachineGui implements Listener {
         };
         Inventory inv = Bukkit.createInventory(holder, size, title);
         holder.inventory = inv;
-        if (type != Type.CREATE) slot(holder);
+        if (type != Type.CREATE && type != Type.INSERT) slot(holder);
         if (type == Type.MAIN) {
-            inv.setItem(SLOT_CREATE, buttonOrDefault("create-card", Material.PAPER,
-                    "<gold>Create New Tap2Go Card", "<gray>Choose an initial balance using the keypad",
-                    "<gray>Card deposit: <yellow>" + money(cardDeposit()),
-                    "<gray>Maximum initial balance: <white>" + money(maxCreationBalance())));
+            // Only offer new card creation when no card is inserted.
+            if (holder.card == null) {
+                inv.setItem(SLOT_CREATE, buttonOrDefault("create-card", Material.PAPER,
+                        "<gold>Create New Tap2Go Card", "<gray>Choose an initial balance using the keypad",
+                        "<gray>Card deposit: <yellow>" + money(cardDeposit()),
+                        "<gray>Maximum initial balance: <white>" + money(maxCreationBalance())));
+            }
             inv.setItem(SLOT_BALANCE, button("balance"));
             inv.setItem(SLOT_TOPUP, button("topup"));
             inv.setItem(SLOT_REFUND, button("refund"));
             inv.setItem(SLOT_HISTORY, simple(Material.BOOK, "<aqua>Transaction History",
                     "<gray>View journeys and top-ups for inserted card"));
+        } else if (type == Type.INSERT) {
+            renderInsert(holder);
         } else if (type == Type.CREATE) {
             renderCreate(holder);
         } else if (type == Type.TOPUP) {
@@ -284,6 +301,34 @@ public final class MachineGui implements Listener {
         p.openInventory(inv);
     }
 
+    private void renderInsert(MachineHolder holder) {
+        Inventory inv = holder.inventory;
+        inv.setItem(SLOT_INSERT, holder.card == null
+                ? simple(Material.HOPPER, "<yellow>Drop your Tap2Go card here",
+                "<gray>Pick up a card from your inventory",
+                "<gray>and place or drag it into this slot")
+                : holder.card.clone());
+        inv.setItem(11, simple(Material.BOOK, "<aqua>Card reader",
+                holder.card == null ? "<gray>No card inserted" : "<green>Card inserted",
+                "<gray>Only the card in the reader can be used"));
+        inv.setItem(15, simple(Material.LIME_CONCRETE, "<green>Continue",
+                "<gray>Return to the ticket machine"));
+        inv.setItem(22, button("back"));
+    }
+
+    private boolean validCard(Player p, ItemStack item) {
+        String id = getCardId(item);
+        if (id == null || item.getAmount() != 1) return false;
+        try {
+            if (plugin.db().getBalance(id) == null) { msg(p, "invalid-card"); return false; }
+            return true;
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Card validation failed: " + ex);
+            msg(p, "error");
+            return false;
+        }
+    }
+
     private String stationLabel(String id) {
         if (id == null) return "Unknown";
         org.bukkit.configuration.file.YamlConfiguration yaml =
@@ -309,40 +354,45 @@ public final class MachineGui implements Listener {
             }
             return;
         }
-        if (e.getClickedInventory() == p.getInventory()) {
-            if (holder.card != null) return;
-            ItemStack item = e.getCurrentItem();
-            if (getCardId(item) == null) return;
-            if (item.getAmount() != 1) return;
-            try {
-                if (plugin.db().getBalance(getCardId(item)) == null) { msg(p, "invalid-card"); return; }
-            } catch (SQLException ex) { msg(p, "error"); return; }
-            holder.card = item.clone();
-            e.setCurrentItem(null);
-            slot(holder);
-            return;
-        }
-        if (e.getClickedInventory() != e.getView().getTopInventory()) return;
-        int index = e.getSlot();
-        if (index == SLOT_CARD) {
-            if (holder.card != null && e.getCursor().getType().isAir()) {
-                e.setCursor(holder.card);
-                holder.card = null;
-                slot(holder);
-            } else if (holder.card == null && getCardId(e.getCursor()) != null && e.getCursor().getAmount() == 1) {
-                try {
-                    if (plugin.db().getBalance(getCardId(e.getCursor())) == null) { msg(p, "invalid-card"); return; }
-                } catch (SQLException ex) { msg(p, "error"); return; }
-                holder.card = e.getCursor().clone();
-                e.setCursor(null);
-                slot(holder);
+        if (holder.type == Type.INSERT) {
+            // The bottom inventory behaves normally: pick up a card, then place
+            // it in the dedicated reader slot. Never permit shift/hotbar moves.
+            if (e.getClickedInventory() == p.getInventory()) {
+                e.setCancelled(false);
+                return;
+            }
+            if (e.getClickedInventory() != e.getView().getTopInventory()) return;
+            int index = e.getSlot();
+            if (index == SLOT_INSERT) {
+                ItemStack cursor = e.getCursor();
+                if (holder.card != null && (cursor == null || cursor.getType().isAir())) {
+                    updateCursorNextTick(p, holder.card);
+                    holder.card = null;
+                    renderInsert(holder);
+                } else if (holder.card == null && validCard(p, cursor)) {
+                    holder.card = cursor.clone();
+                    updateCursorNextTick(p, null);
+                    renderInsert(holder);
+                } else if (holder.card != null && getCardId(cursor) != null) {
+                    p.sendMessage(text("<yellow>Remove the inserted card first."));
+                }
+            } else if (index == 15 || index == 22) {
+                navigate(p, holder, Type.MAIN, 0);
             }
             return;
         }
+        // Card insertion/removal is only possible inside the reader GUI.
+        if (e.getClickedInventory() != e.getView().getTopInventory()) return;
+        int index = e.getSlot();
+        if (index == SLOT_CARD) {
+            navigate(p, holder, Type.INSERT, 0);
+            return;
+        }
         switch (holder.type) {
+            case INSERT -> { /* Handled above. */ }
             case MAIN -> {
                 switch (index) {
-                    case SLOT_CREATE -> navigate(p, holder, Type.CREATE, 0);
+                    case SLOT_CREATE -> { if (holder.card == null) navigate(p, holder, Type.CREATE, 0); }
                     case SLOT_BALANCE -> { if (requireCard(p, holder)) checkBalance(p, holder); }
                     case SLOT_TOPUP -> { if (requireCard(p, holder)) navigate(p, holder, Type.TOPUP, 0); }
                     case SLOT_REFUND -> { if (requireCard(p, holder)) navigate(p, holder, Type.REFUND_CONFIRM, 0); }
@@ -366,7 +416,18 @@ public final class MachineGui implements Listener {
 
     @EventHandler
     public void onDrag(InventoryDragEvent e) {
-        if (e.getView().getTopInventory().getHolder(false) instanceof MachineHolder) e.setCancelled(true);
+        if (!(e.getView().getTopInventory().getHolder(false) instanceof MachineHolder holder)) return;
+        // Dragging one card directly onto the dedicated reader slot is allowed.
+        if (holder.type == Type.INSERT && holder.card == null
+                && e.getRawSlots().size() == 1 && e.getRawSlots().contains(SLOT_INSERT)
+                && e.getWhoClicked() instanceof Player p && validCard(p, e.getOldCursor())) {
+            e.setCancelled(true);
+            holder.card = e.getOldCursor().clone();
+            updateCursorNextTick(p, null);
+            renderInsert(holder);
+            return;
+        }
+        e.setCancelled(true);
     }
 
     @EventHandler

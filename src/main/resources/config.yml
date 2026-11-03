@@ -17,6 +17,7 @@ currency:
 gui:
   title: "<dark_gray>SylvPay Ticket Machine"
   topup-title: "<dark_gray>Top Up Your Card"
+  insert-title: "<dark_gray>Insert Tap2Go Card"
 
   custom:
     enabled: false

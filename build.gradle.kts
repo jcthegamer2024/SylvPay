@@ -56,3 +56,13 @@ tasks {
         }
     }
 }
+
+// ==========================================
+// JAVA COMPILER WARNINGS
+// ==========================================
+// Show the exact deprecated API methods,
+// including their file names and line numbers.
+
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.add("-Xlint:deprecation")
+}
