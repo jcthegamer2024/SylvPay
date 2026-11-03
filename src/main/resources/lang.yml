@@ -1,0 +1,5 @@
+# SylvPay display branding. MiniMessage formatting remains in config.yml.
+# This file is created automatically on first startup if missing.
+branding:
+  plugin: "SylvPay"
+  card: "Tap2Go"

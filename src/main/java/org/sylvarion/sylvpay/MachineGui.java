@@ -30,13 +30,14 @@ import java.util.Locale;
 
 public final class MachineGui implements Listener {
 
-    private enum Type { MAIN, TOPUP, HISTORY, REFUND_CONFIRM }
+    private enum Type { MAIN, CREATE, TOPUP, HISTORY, REFUND_CONFIRM }
 
     private static final class MachineHolder implements InventoryHolder {
         final Type type;
         Inventory inventory;
         ItemStack card;
         int page;
+        String creationAmount = "0"; // Reused as keypad input for creation and top-ups
         boolean transferring;
         MachineHolder(Type type, ItemStack card, int page) {
             this.type = type; this.card = card; this.page = page;
@@ -51,6 +52,13 @@ public final class MachineGui implements Listener {
     private static final int SLOT_REFUND = 17;
     private static final int SLOT_HISTORY = 22;
     private static final int SLOT_BACK = 22;
+    private static final int SLOT_CREATE = 11;
+    private static final int[] KEYPAD_DIGITS = {19, 20, 21, 28, 29, 30, 37, 38, 39};
+    private static final int SLOT_DECIMAL = 46;
+    private static final int SLOT_ZERO = 47;
+    private static final int SLOT_CLEAR = 48;
+    private static final int SLOT_CONFIRM_CREATE = 33;
+    private static final int SLOT_CREATE_BACK = 53;
 
     private final SylvPayMain plugin;
     private final MiniMessage mm = MiniMessage.miniMessage();
@@ -69,7 +77,7 @@ public final class MachineGui implements Listener {
     }
 
     private Component text(String s, String... pairs) {
-        return mm.deserialize(fill(s, pairs)).decoration(TextDecoration.ITALIC, false);
+        return mm.deserialize(plugin.lang().brand(fill(s, pairs))).decoration(TextDecoration.ITALIC, false);
     }
 
     private void msg(Player p, String key, String... pairs) {
@@ -215,34 +223,31 @@ public final class MachineGui implements Listener {
 
     private void open(Player p, Type type, ItemStack card, int page) {
         MachineHolder holder = new MachineHolder(type, card, page);
-        int size = type == Type.HISTORY ? 45 : 27;
+        int size = (type == Type.CREATE || type == Type.TOPUP) ? 54 : type == Type.HISTORY ? 45 : 27;
         Component title = switch (type) {
             case MAIN -> guiTitle(false);
+            case CREATE -> text(cfg().getString("gui.create-title", "<dark_gray>Create Tap2Go Card"));
             case TOPUP -> guiTitle(true);
             case HISTORY -> text("<dark_gray>Tap2Go Transaction History");
             case REFUND_CONFIRM -> text("<dark_red>Confirm Card Refund");
         };
         Inventory inv = Bukkit.createInventory(holder, size, title);
         holder.inventory = inv;
-        slot(holder);
+        if (type != Type.CREATE) slot(holder);
         if (type == Type.MAIN) {
-            List<Double> options = cfg().getDoubleList("card.buy-options");
-            double price = cfg().getDouble("card.price");
-            for (int i = 0; i < Math.min(4, options.size()); i++) {
-                double preload = options.get(i);
-                inv.setItem(OPTION_SLOTS[i], button("buy", "{amount}", money(preload),
-                        "{price}", money(price), "{total}", money(price + preload)));
-            }
+            inv.setItem(SLOT_CREATE, buttonOrDefault("create-card", Material.PAPER,
+                    "<gold>Create New Tap2Go Card", "<gray>Choose an initial balance using the keypad",
+                    "<gray>Card deposit: <yellow>" + money(cardDeposit()),
+                    "<gray>Maximum initial balance: <white>" + money(maxCreationBalance())));
             inv.setItem(SLOT_BALANCE, button("balance"));
             inv.setItem(SLOT_TOPUP, button("topup"));
             inv.setItem(SLOT_REFUND, button("refund"));
             inv.setItem(SLOT_HISTORY, simple(Material.BOOK, "<aqua>Transaction History",
                     "<gray>View journeys and top-ups for inserted card"));
+        } else if (type == Type.CREATE) {
+            renderCreate(holder);
         } else if (type == Type.TOPUP) {
-            List<Double> options = cfg().getDoubleList("topup-options");
-            for (int i = 0; i < Math.min(4, options.size()); i++)
-                inv.setItem(OPTION_SLOTS[i], button("topup-amount", "{amount}", money(options.get(i))));
-            inv.setItem(SLOT_BACK, button("back"));
+            renderTopup(holder);
         } else if (type == Type.REFUND_CONFIRM) {
             inv.setItem(11, simple(Material.LIME_CONCRETE, "<green>Confirm refund",
                     "<gray>Deactivate this card and refund its balance"));
@@ -297,6 +302,13 @@ public final class MachineGui implements Listener {
         e.setCancelled(true);
         if (!(e.getWhoClicked() instanceof Player p)) return;
         if (e.getClick().isKeyboardClick() || e.getClick().isShiftClick()) return;
+        if (holder.type == Type.CREATE || holder.type == Type.TOPUP) {
+            if (e.getClickedInventory() == e.getView().getTopInventory()) {
+                if (holder.type == Type.CREATE) handleCreateClick(p, holder, e.getSlot());
+                else handleTopupClick(p, holder, e.getSlot());
+            }
+            return;
+        }
         if (e.getClickedInventory() == p.getInventory()) {
             if (holder.card != null) return;
             ItemStack item = e.getCurrentItem();
@@ -330,17 +342,15 @@ public final class MachineGui implements Listener {
         switch (holder.type) {
             case MAIN -> {
                 switch (index) {
-                    case 10, 11, 12, 13 -> buyCard(p, index - 10);
+                    case SLOT_CREATE -> navigate(p, holder, Type.CREATE, 0);
                     case SLOT_BALANCE -> { if (requireCard(p, holder)) checkBalance(p, holder); }
                     case SLOT_TOPUP -> { if (requireCard(p, holder)) navigate(p, holder, Type.TOPUP, 0); }
                     case SLOT_REFUND -> { if (requireCard(p, holder)) navigate(p, holder, Type.REFUND_CONFIRM, 0); }
                     case SLOT_HISTORY -> { if (requireCard(p, holder)) navigate(p, holder, Type.HISTORY, 0); }
                 }
             }
-            case TOPUP -> {
-                if (index >= 10 && index <= 13 && requireCard(p, holder)) topUp(p, holder, index - 10);
-                else if (index == SLOT_BACK) navigate(p, holder, Type.MAIN, 0);
-            }
+            case CREATE -> { /* Handled above. */ }
+            case TOPUP -> { /* Handled by keypad above. */ }
             case REFUND_CONFIRM -> {
                 if (index == 11 && requireCard(p, holder)) refund(p, holder);
                 else if (index == 15) navigate(p, holder, Type.MAIN, 0);
@@ -367,37 +377,102 @@ public final class MachineGui implements Listener {
 
     // ------------------------------------------------------------------ actions
 
-    private void buyCard(Player p, int index) {
-        List<Double> options = cfg().getDoubleList("card.buy-options");
-        if (index >= options.size()) return;
+    // Creation uses a decimal keypad; amounts are stored as text to avoid floating-point input errors.
+    private double cardDeposit() { return Math.max(0, round(cfg().getDouble("card.price", 2.50))); }
+    private double maxCreationBalance() {
+        double configured = cfg().getDouble("card.max-creation-balance", 500.0);
+        return Double.isFinite(configured) ? Math.max(0, Math.min(500.0, round(configured))) : 500.0;
+    }
 
-        double preload = round(options.get(index));
-        double total = round(cfg().getDouble("card.price") + preload);
+    private ItemStack buttonOrDefault(String key, Material material, String name, String... lore) {
+        return cfg().isConfigurationSection("buttons." + key) ? button(key) : simple(material, name, lore);
+    }
 
-        if (!plugin.economy().has(p, total)) {
-            msg(p, "not-enough-money", "{amount}", money(total));
+    private double enteredAmount(MachineHolder holder) {
+        try { return round(Double.parseDouble(holder.creationAmount)); }
+        catch (NumberFormatException ex) { return 0; }
+    }
+
+    private void renderCreate(MachineHolder holder) {
+        Inventory inv = holder.inventory;
+        double preload = enteredAmount(holder);
+        double total = round(preload + cardDeposit());
+        inv.setItem(13, simple(Material.CLOCK, "<aqua>Initial balance: <white>" + money(preload),
+                "<gray>Card deposit: <yellow>" + money(cardDeposit()),
+                "<gray>Total to pay: <green>" + money(total),
+                "<gray>Maximum balance: <white>" + money(maxCreationBalance())));
+        for (int digit = 1; digit <= 9; digit++) {
+            inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
+                    "<white><bold>" + digit));
+        }
+        inv.setItem(SLOT_ZERO, simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>0"));
+        inv.setItem(SLOT_DECIMAL, simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)"));
+        inv.setItem(SLOT_CLEAR, simple(Material.REDSTONE, "<red>Clear amount"));
+        inv.setItem(SLOT_CONFIRM_CREATE, simple(Material.LIME_CONCRETE,
+                "<green>Buy Tap2Go Card — " + money(total),
+                "<gray>Initial balance: <white>" + money(preload),
+                "<gray>Deposit: <yellow>" + money(cardDeposit()),
+                "<yellow>Click to confirm purchase"));
+        inv.setItem(SLOT_CREATE_BACK, button("back"));
+    }
+
+    private void handleCreateClick(Player p, MachineHolder holder, int slot) {
+        if (slot == SLOT_CREATE_BACK) { navigate(p, holder, Type.MAIN, 0); return; }
+        if (slot == SLOT_CONFIRM_CREATE) { buyCard(p, holder); return; }
+        if (slot == SLOT_CLEAR) { holder.creationAmount = "0"; renderCreate(holder); return; }
+        if (slot == SLOT_DECIMAL) {
+            if (!holder.creationAmount.contains(".")) holder.creationAmount += ".";
+            renderCreate(holder); return;
+        }
+        int digit = slot == SLOT_ZERO ? 0 : -1;
+        if (digit == -1) {
+            for (int i = 0; i < KEYPAD_DIGITS.length; i++)
+                if (KEYPAD_DIGITS[i] == slot) { digit = i + 1; break; }
+        }
+        if (digit < 0) return;
+        String input = holder.creationAmount;
+        int dot = input.indexOf('.');
+        if (dot >= 0 && input.length() - dot > 2) return; // at most two decimal places
+        String candidate = input.equals("0") ? Integer.toString(digit) : input + digit;
+        if (candidate.length() > 8) return;
+        double amount;
+        try { amount = Double.parseDouble(candidate); }
+        catch (NumberFormatException ex) { return; }
+        if (amount > maxCreationBalance()) {
+            p.sendMessage(text("<red>Maximum initial card balance is " + money(maxCreationBalance()) + "."));
             return;
+        }
+        holder.creationAmount = candidate;
+        renderCreate(holder);
+    }
+
+    private void buyCard(Player p, MachineHolder holder) {
+        double preload = enteredAmount(holder);
+        if (!Double.isFinite(preload) || preload < 0 || preload > maxCreationBalance()) {
+            p.sendMessage(text("<red>Invalid initial card balance.")); return;
+        }
+        double total = round(cardDeposit() + preload);
+        if (!plugin.economy().has(p, total)) {
+            msg(p, "not-enough-money", "{amount}", money(total)); return;
         }
         EconomyResponse r = plugin.economy().withdrawPlayer(p, total);
         if (!r.transactionSuccess()) {
-            msg(p, "not-enough-money", "{amount}", money(total));
-            return;
+            msg(p, "not-enough-money", "{amount}", money(total)); return;
         }
-
         String id;
         try {
             id = plugin.db().createCard(p.getUniqueId(), preload);
         } catch (SQLException ex) {
             plugin.getLogger().severe("Database error while buying card: " + ex.getMessage());
-            plugin.economy().depositPlayer(p, total); // give the money back
-            msg(p, "error");
-            return;
+            EconomyResponse reversal = plugin.economy().depositPlayer(p, total);
+            if (!reversal.transactionSuccess()) plugin.getLogger().severe("MANUAL REPAYMENT REQUIRED: " + p.getUniqueId() + " amount " + total);
+            msg(p, "error"); return;
         }
-
         ItemStack card = createCardItem(id);
         p.getInventory().addItem(card).values()
                 .forEach(left -> p.getWorld().dropItemNaturally(p.getLocation(), left));
         msg(p, "bought", "{id}", id, "{balance}", money(preload));
+        navigate(p, holder, Type.MAIN, 0);
     }
 
     private void checkBalance(Player p, MachineHolder holder) {
@@ -409,35 +484,114 @@ public final class MachineGui implements Listener {
         } catch (SQLException ex) { msg(p, "error"); plugin.getLogger().severe(ex.getMessage()); }
     }
 
-    private void topUp(Player p, MachineHolder holder, int index) {
-        List<Double> options = cfg().getDoubleList("topup-options");
-        if (index >= options.size()) return;
-        double amount = round(options.get(index));
-        if (amount <= 0 || !Double.isFinite(amount)) return;
+    private double maxTopupAmount(MachineHolder holder) {
+        double max = cfg().getDouble("max-balance", 1000.0);
+        if (!Double.isFinite(max) || max <= 0) return 999999.99;
+        try {
+            Double balance = plugin.db().getBalance(selectedId(holder));
+            return balance == null ? 0 : Math.max(0, round(max - balance));
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Could not read card balance for keypad: " + ex);
+            return 0;
+        }
+    }
+
+    private void renderTopup(MachineHolder holder) {
+        Inventory inv = holder.inventory;
+        double amount = enteredAmount(holder);
+        double current = 0;
+        try {
+            Double b = plugin.db().getBalance(selectedId(holder));
+            if (b != null) current = b;
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Could not read balance: " + ex);
+        }
+        inv.setItem(13, simple(Material.CLOCK, "<aqua>Top-up amount: <white>" + money(amount),
+                "<gray>Current balance: <white>" + money(current),
+                "<gray>Balance after top-up: <green>" + money(round(current + amount)),
+                "<gray>Maximum card balance: <yellow>" + money(cfg().getDouble("max-balance", 1000))));
+        for (int digit = 1; digit <= 9; digit++)
+            inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
+                    "<white><bold>" + digit));
+        inv.setItem(SLOT_ZERO, simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>0"));
+        inv.setItem(SLOT_DECIMAL, simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)"));
+        inv.setItem(SLOT_CLEAR, simple(Material.REDSTONE, "<red>Clear amount"));
+        inv.setItem(SLOT_CONFIRM_CREATE, simple(Material.LIME_CONCRETE,
+                "<green>Confirm Top Up — " + money(amount),
+                "<gray>Add this amount to the inserted Tap2Go card",
+                "<yellow>Click to confirm payment"));
+        inv.setItem(SLOT_CREATE_BACK, button("back"));
+    }
+
+    private void handleTopupClick(Player p, MachineHolder holder, int slot) {
+        if (slot == SLOT_CREATE_BACK) { navigate(p, holder, Type.MAIN, 0); return; }
+        if (slot == SLOT_CONFIRM_CREATE) { topUp(p, holder); return; }
+        if (slot == SLOT_CLEAR) { holder.creationAmount = "0"; renderTopup(holder); return; }
+        if (slot == SLOT_DECIMAL) {
+            if (!holder.creationAmount.contains(".")) holder.creationAmount += ".";
+            renderTopup(holder); return;
+        }
+        int digit = slot == SLOT_ZERO ? 0 : -1;
+        if (digit == -1) {
+            for (int i = 0; i < KEYPAD_DIGITS.length; i++)
+                if (KEYPAD_DIGITS[i] == slot) { digit = i + 1; break; }
+        }
+        if (digit < 0) return;
+        String input = holder.creationAmount;
+        int dot = input.indexOf('.');
+        if (dot >= 0 && input.length() - dot > 2) return;
+        String candidate = input.equals("0") ? Integer.toString(digit) : input + digit;
+        if (candidate.length() > 8) return;
+        double amount;
+        try { amount = Double.parseDouble(candidate); }
+        catch (NumberFormatException ex) { return; }
+        if (amount > maxTopupAmount(holder)) {
+            p.sendMessage(text("<red>Maximum additional top-up is " + money(maxTopupAmount(holder)) + "."));
+            return;
+        }
+        holder.creationAmount = candidate;
+        renderTopup(holder);
+    }
+
+    private void topUp(Player p, MachineHolder holder) {
+        double amount = enteredAmount(holder);
+        if (!Double.isFinite(amount) || amount <= 0) {
+            p.sendMessage(text("<red>Enter a top-up amount greater than zero."));
+            return;
+        }
         String id = selectedId(holder);
+        if (id == null) { msg(p, "no-card"); return; }
         try {
             Double current = plugin.db().getBalance(id);
             if (current == null) { msg(p, "invalid-card"); return; }
-            double max = cfg().getDouble("max-balance", 0);
-            if (max > 0 && current + amount > max) {
+            double max = cfg().getDouble("max-balance", 1000.0);
+            if (max > 0 && round(current + amount) > max) {
                 msg(p, "max-balance", "{max}", money(max)); return;
             }
             if (!plugin.economy().has(p, amount)) {
                 msg(p, "not-enough-money", "{amount}", money(amount)); return;
             }
             EconomyResponse response = plugin.economy().withdrawPlayer(p, amount);
-            if (!response.transactionSuccess()) { msg(p, "not-enough-money", "{amount}", money(amount)); return; }
+            if (!response.transactionSuccess()) {
+                msg(p, "not-enough-money", "{amount}", money(amount)); return;
+            }
             try {
                 if (!plugin.db().addBalance(id, amount)) {
-                    plugin.economy().depositPlayer(p, amount);
+                    EconomyResponse reversal = plugin.economy().depositPlayer(p, amount);
+                    if (!reversal.transactionSuccess()) plugin.getLogger().severe("MANUAL REPAYMENT REQUIRED: " + p.getUniqueId() + " amount " + amount);
                     msg(p, "invalid-card"); return;
                 }
             } catch (SQLException ex) {
-                plugin.economy().depositPlayer(p, amount);
+                EconomyResponse reversal = plugin.economy().depositPlayer(p, amount);
+                if (!reversal.transactionSuccess()) plugin.getLogger().severe("MANUAL REPAYMENT REQUIRED: " + p.getUniqueId() + " amount " + amount);
                 throw ex;
             }
             msg(p, "topped-up", "{amount}", money(amount), "{balance}", money(round(current + amount)));
-        } catch (SQLException ex) { plugin.getLogger().severe("Top-up error: " + ex); msg(p, "error"); }
+            navigate(p, holder, Type.MAIN, 0);
+        } catch (SQLException ex) {
+            plugin.getLogger().severe("Top-up error: " + ex);
+            msg(p, "error");
+        }
     }
 
     private void refund(Player p, MachineHolder holder) {

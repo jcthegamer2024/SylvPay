@@ -23,6 +23,7 @@ public final class SylvPayMain extends JavaPlugin {
     private CardDatabase database;
     private NamespacedKey cardKey;
     private MachineGui gui;
+    private LangManager lang;
     private StationManager stations;
     private FareManager fares;
     private NexoGateBridge nexo;
@@ -31,6 +32,7 @@ public final class SylvPayMain extends JavaPlugin {
 
     @Override public void onEnable(){
         saveDefaultConfig();
+        lang = new LangManager(this);
         RegisteredServiceProvider<Economy> rsp=getServer().getServicesManager().getRegistration(Economy.class);
         if(rsp==null){getLogger().severe("No Vault economy found; enable CMI/Vault economy.");getServer().getPluginManager().disablePlugin(this);return;}
         economy=rsp.getProvider();
@@ -51,6 +53,7 @@ public final class SylvPayMain extends JavaPlugin {
         getLogger().info("SylvPay enabled using "+economy.getName());
     }
     @Override public void onDisable(){if(fareGates!=null)fareGates.shutdown();}
+    public LangManager lang(){return lang;}
     public Economy economy(){return economy;}
     public CardDatabase db(){return database;}
     public NamespacedKey cardKey(){return cardKey;}
@@ -60,7 +63,8 @@ public final class SylvPayMain extends JavaPlugin {
         if(pm.getPermission("sylvpay.use")==null)pm.addPermission(new Permission("sylvpay.use","Use SylvPay",PermissionDefault.TRUE));
         if(pm.getPermission("sylvpay.admin")==null)pm.addPermission(new Permission("sylvpay.admin","Configure SylvPay",PermissionDefault.OP));
     }
-    private void feedback(Player p,String text){p.sendMessage(mm.deserialize(text));}
+    private void feedback(Player p,String text){p.sendMessage(mm.deserialize(lang.brand(text)));}
+    private void legacyFeedback(CommandSender sender, String text) { legacyFeedback(sender, lang.brand(text)); }
     private ItemDisplay target(Player p){
         ItemDisplay d=nexo.target(p);
         if(d==null){feedback(p,"<red>Look at a Nexo fare gate within 6 blocks.");return null;}
@@ -81,44 +85,44 @@ public final class SylvPayMain extends JavaPlugin {
         catch(IOException ex){getLogger().severe("Cannot save gates.yml: "+ex.getMessage());feedback(p,"<red>Cannot save gates.yml.");}
     }
     private void listStations(CommandSender sender) {
-        sender.sendMessage("§6SylvPay — Stations with registered gates:");
+        legacyFeedback(sender, "§6SylvPay — Stations with registered gates:");
         int total = 0;
         for (String station : stations.stationIds()) {
             long count = stations.registeredGates().stream().filter(g -> g.gate().station().equals(station)).count();
             if (count == 0) continue;
             total++;
-            sender.sendMessage("§e" + stations.stationName(station) + " §7(" + station + ") §f— " + count
+            legacyFeedback(sender, "§e" + stations.stationName(station) + " §7(" + station + ") §f— " + count
                     + " gate(s) §8(/sylvpay gates " + station + ")");
         }
-        if (total == 0) sender.sendMessage("§7No stations have registered gates yet.");
+        if (total == 0) legacyFeedback(sender, "§7No stations have registered gates yet.");
     }
 
     private void listGates(CommandSender sender, String station) {
         if (!stations.hasStation(station)) {
-            sender.sendMessage("§cUnknown station: " + station);
+            legacyFeedback(sender, "§cUnknown station: " + station);
             return;
         }
         List<StationManager.RegisteredGate> gates = stations.registeredGates().stream()
                 .filter(g -> g.gate().station().equals(station)).toList();
-        sender.sendMessage("§6" + stations.stationName(station) + " §7— " + gates.size() + " gate(s):");
+        legacyFeedback(sender, "§6" + stations.stationName(station) + " §7— " + gates.size() + " gate(s):");
         for (StationManager.RegisteredGate gate : gates) {
             String coordinates = gate.world().equals("unknown") ? "location unknown"
                     : gate.world() + " " + (int)Math.floor(gate.x()) + ", "
                     + (int)Math.floor(gate.y()) + ", " + (int)Math.floor(gate.z());
-            sender.sendMessage("§e#" + gate.id() + " §f" + gate.gate().direction()
+            legacyFeedback(sender, "§e#" + gate.id() + " §f" + gate.gate().direction()
                     + " §7— " + coordinates);
         }
-        if (gates.isEmpty()) sender.sendMessage("§7No gates registered at this station.");
+        if (gates.isEmpty()) legacyFeedback(sender, "§7No gates registered at this station.");
     }
 
     private void deleteGate(CommandSender sender, int id) {
-        if (id <= 0) { sender.sendMessage("§cGate ID must be positive."); return; }
+        if (id <= 0) { legacyFeedback(sender, "§cGate ID must be positive."); return; }
         try {
-            if (stations.delete(id)) sender.sendMessage("§aGate #" + id + " unregistered. Furniture was left in place.");
-            else sender.sendMessage("§cNo registered gate with ID #" + id + ".");
+            if (stations.delete(id)) legacyFeedback(sender, "§aGate #" + id + " unregistered. Furniture was left in place.");
+            else legacyFeedback(sender, "§cNo registered gate with ID #" + id + ".");
         } catch (IOException ex) {
             getLogger().severe("Cannot save gates.yml: " + ex.getMessage());
-            sender.sendMessage("§cCould not save gates.yml. Gate was not deleted.");
+            legacyFeedback(sender, "§cCould not save gates.yml. Gate was not deleted.");
         }
     }
 
@@ -131,7 +135,7 @@ public final class SylvPayMain extends JavaPlugin {
                             .executes(ctx->{gui.openMain((Player)ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))
                     .then(Commands.literal("reload")
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
-                            .executes(ctx->{reloadConfig();stations.reload();fares.reload();ctx.getSource().getSender().sendMessage("SylvPay config, stations and fares reloaded.");return Command.SINGLE_SUCCESS;}))
+                            .executes(ctx->{reloadConfig();lang.reload();stations.reload();fares.reload();legacyFeedback(ctx.getSource().getSender(), "SylvPay config, stations and fares reloaded.");return Command.SINGLE_SUCCESS;}))
                     .then(Commands.literal("stations")
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
                             .executes(ctx->{listStations(ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))

@@ -284,12 +284,12 @@ public final class FareGateManager implements Listener {
 
     private void message(Player player, String key, String station, String origin, double fare, double balance) {
         String template = plugin.getConfig().getString("faregates.messages." + key, "<red>Fare gate error.");
-        player.sendMessage(mm.deserialize(template
+        player.sendMessage(mm.deserialize(plugin.lang().brand(template
                 .replace("{station}", stations.stationName(station))
                 .replace("{zone}", zoneLabel(station))
                 .replace("{origin_zone}", zoneLabel(origin))
                 .replace("{origin}", origin == null ? "" : stations.stationName(origin))
                 .replace("{fare}", formatMoney(fare))
-                .replace("{balance}", formatMoney(balance))));
+                .replace("{balance}", formatMoney(balance)))));
     }
 }
