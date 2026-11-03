@@ -21,8 +21,9 @@ public final class NexoGateBridge implements Listener {
     public NexoGateBridge(SylvPayMain plugin) { this.plugin = plugin; }
 
     public boolean register(FareGateManager manager) {
-        if (!Bukkit.getPluginManager().isPluginEnabled("Nexo")) return false;
+        if (!Bukkit.getPluginManager().isPluginEnabled("Nexo")) {plugin.debug().log("NEXO", "Nexo unavailable; bridge not registered");return false;}
         gates = manager;
+        plugin.debug().log("NEXO", "Registered Nexo furniture listener");
         Bukkit.getPluginManager().registerEvents(this, plugin);
         return true;
     }
@@ -42,6 +43,7 @@ public final class NexoGateBridge implements Listener {
                 return;
             }
         }
+        plugin.debug().log("NEXO", "Furniture interaction: entity=%s player=%s",display.getUniqueId(),event.getPlayer().getName());
         event.setCancelled(true);
         Player player = event.getPlayer();
         // Don't mutate Nexo furniture from inside its own interaction event.
@@ -72,10 +74,10 @@ public final class NexoGateBridge implements Listener {
     public ItemDisplay replace(ItemDisplay previous, String replacementId) {
         if (previous == null || !previous.isValid() || !exists(replacementId)) return null;
         Location position = previous.getLocation().clone();
-        if (!NexoFurniture.remove(previous)) return null;
+        if (!NexoFurniture.remove(previous)) {plugin.debug().log("NEXO", "Could not remove furniture %s",previous.getUniqueId());return null;}
         try {
             ItemDisplay placed = NexoFurniture.place(replacementId, position, position.getYaw(), BlockFace.UP);
-            if (placed != null) return placed;
+            if (placed != null) {plugin.debug().log("NEXO", "Replaced furniture %s -> %s model=%s",previous.getUniqueId(),placed.getUniqueId(),replacementId);return placed;}
         } catch (RuntimeException ex) {
             plugin.getLogger().severe("Nexo placement failed: " + ex);
         }

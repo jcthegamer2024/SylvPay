@@ -14,7 +14,7 @@ public final class FareManager {
         if (!file.exists()) plugin.saveResource("fares.yml", false);
         reload();
     }
-    public void reload() { fares = YamlConfiguration.loadConfiguration(file); }
+    public void reload() { fares = YamlConfiguration.loadConfiguration(file); plugin.debug().log("FARES", "Loaded fare rules from fares.yml"); }
     public double fare(String from, String to) {
         String path = "fares.routes." + from + "." + to;
         double amount;
@@ -25,7 +25,9 @@ public final class FareManager {
             amount = fares.getDouble("fares.routes." + to + "." + from);
         else amount = fares.getDouble("fares.default-fare", 3);
         if (!Double.isFinite(amount) || amount < 0) throw new IllegalArgumentException("Invalid fare " + from + " -> " + to);
-        return Math.round(amount * 100.0) / 100.0;
+        double result = Math.round(amount * 100.0) / 100.0;
+        plugin.debug().log("FARES", "Calculated fare %s -> %s: %.2f",from,to,result);
+        return result;
     }
     public long maxJourneyMillis() {
         return Math.max(1, fares.getLong("fares.maximum-journey-minutes", 180)) * 60_000L;

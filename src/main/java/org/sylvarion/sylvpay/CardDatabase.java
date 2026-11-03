@@ -15,7 +15,9 @@ public final class CardDatabase {
     public record HistoryEntry(String kind, String origin, String destination,
                                long startedAt, long endedAt, double amount) {}
     private final String url;
+    private final SylvPayMain plugin;
     public CardDatabase(JavaPlugin plugin) {
+        this.plugin = (SylvPayMain) plugin;
         plugin.getDataFolder().mkdirs();
         url = "jdbc:sqlite:" + new File(plugin.getDataFolder(), "cards.db").getAbsolutePath();
     }
@@ -40,6 +42,7 @@ public final class CardDatabase {
                     if (ps.executeUpdate() == 1) {
                         insertTransaction(c, id, "ISSUED", balance);
                         c.commit();
+                        plugin.debug().log("DATABASE", "Card created: id=%s owner=%s initialBalance=%.2f",id,owner,balance);
                         return id;
                     }
                     c.rollback();
@@ -63,6 +66,7 @@ public final class CardDatabase {
                 if (ps.executeUpdate() != 1) { c.rollback(); return false; }
                 insertTransaction(c, id, "TOPUP", amount);
                 c.commit();
+                plugin.debug().log("DATABASE", "Balance added: card=%s amount=%.2f",id,amount);
                 return true;
             } catch (SQLException ex) { c.rollback(); throw ex; }
         }
@@ -80,7 +84,7 @@ public final class CardDatabase {
                     ps.setString(1,id); if(ps.executeUpdate()!=1) { c.rollback(); return null; }
                 }
                 insertTransaction(c, id, "REFUND", balance);
-                c.commit(); return balance;
+                c.commit(); plugin.debug().log("DATABASE", "Card deactivated/refunded: card=%s balance=%.2f",id,balance); return balance;
             } catch(SQLException e) { c.rollback(); throw e; }
         }
     }
@@ -105,7 +109,7 @@ public final class CardDatabase {
                 try(PreparedStatement ps=c.prepareStatement("INSERT INTO journeys(card_id,origin,started_at) VALUES(?,?,?)")){
                     ps.setString(1,id);ps.setString(2,station);ps.setLong(3,System.currentTimeMillis());ps.executeUpdate();
                 }
-                c.commit();return new TapResult(TapStatus.OK,station,0,balance);
+                c.commit();plugin.debug().log("DATABASE", "Journey started: card=%s origin=%s balance=%.2f",id,station,balance);return new TapResult(TapStatus.OK,station,0,balance);
             } catch(SQLException e){c.rollback();throw e;}
         }
     }
@@ -130,7 +134,7 @@ public final class CardDatabase {
                 try(PreparedStatement ps=c.prepareStatement("DELETE FROM journeys WHERE card_id=?")){
                     ps.setString(1,id);ps.executeUpdate();
                 }
-                c.commit();return new TapResult(TapStatus.OK,journey.origin(),fare,Math.round((balance-fare)*100.0)/100.0);
+                c.commit();plugin.debug().log("DATABASE", "Journey completed: card=%s from=%s to=%s fare=%.2f",id,journey.origin(),destination,fare);return new TapResult(TapStatus.OK,journey.origin(),fare,Math.round((balance-fare)*100.0)/100.0);
             }catch(SQLException e){c.rollback();throw e;}
         }
     }
@@ -166,6 +170,7 @@ public final class CardDatabase {
                         rs.getLong("started"), rs.getLong("ended"), rs.getDouble("amount")));
             }
         }
+        plugin.debug().log("DATABASE", "History queried: card=%s page=%d rows=%d",cardId,page,entries.size());
         return entries;
     }
 

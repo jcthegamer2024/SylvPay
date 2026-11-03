@@ -67,9 +67,10 @@ public final class FareGateManager implements Listener {
     }
 
     public boolean tap(Player player, ItemDisplay gate) {
-        if (!plugin.getConfig().getBoolean("faregates.enabled", false)) return false;
+        if (!plugin.getConfig().getBoolean("faregates.enabled", false)) {plugin.debug().log("GATE", "Tap ignored: fare gates disabled");return false;}
         StationManager.Gate assigned = stations.gate(gate);
         if (assigned == null) return false;
+        plugin.debug().log("GATE", "Tap requested: player=%s gate=%s station=%s direction=%s",player.getName(),gate.getUniqueId(),assigned.station(),assigned.direction());
         String station = assigned.station();
         if (open.containsKey(gate.getUniqueId()) || !closedId().equals(nexo.furnitureId(gate))) {
             message(player, "busy", station, null, 0, 0);
@@ -81,7 +82,7 @@ public final class FareGateManager implements Listener {
         if (card == null) { message(player, "no-card", station, null, 0, 0); return true; }
         long now = System.currentTimeMillis();
         long cooldown = plugin.getConfig().getLong("faregates.tap-cooldown-ms", 1500);
-        if (now - lastTap.getOrDefault(player.getUniqueId(), 0L) < cooldown) return true;
+        if (now - lastTap.getOrDefault(player.getUniqueId(), 0L) < cooldown) {plugin.debug().log("GATE", "Tap ignored: cooldown player=%s",player.getName());return true;}
         lastTap.put(player.getUniqueId(), now);
         if (!nexo.exists(openId()) || !nexo.exists(closedId())) {
             message(player, "model-missing", station, null, 0, 0); return true;
@@ -103,6 +104,7 @@ public final class FareGateManager implements Listener {
                 result = plugin.db().tapOut(card, station, fares.fare(journey.origin(), station),
                         fares.maxJourneyMillis());
             }
+            plugin.debug().log("GATE", "Transaction result: player=%s card=%s status=%s fare=%.2f balance=%.2f",player.getName(),card,result.status(),result.fare(),result.balance());
             if (result.status() != CardDatabase.TapStatus.OK) {
                 String key = switch (result.status()) {
                     case INVALID_CARD -> "invalid-card";
@@ -135,6 +137,7 @@ public final class FareGateManager implements Listener {
             UUID openUuid = opened.getUniqueId();
             OpenGate state = new OpenGate(opened, player);
             open.put(openUuid, state);
+            plugin.debug().log("GATE", "Gate opened: entity=%s player=%s timeoutTicks=%d",openUuid,player.getName(),timeout);
             Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), timeout);
             boolean entrance = assigned.direction().equals("entrance");
             message(player, entrance ? "tap-in" : "tap-out",
@@ -185,6 +188,7 @@ public final class FareGateManager implements Listener {
             if (Math.abs(longitudinal) < clear) state.entered = true;
             // Crossing must be observed, and rider must clear the barrier footprint.
             if (state.entered && longitudinal < -clear) {
+                plugin.debug().log("GATE", "Rider cleared gate: player=%s entity=%s",player.getName(),entry.getKey());
                 attemptClose(entry.getKey());
             }
         }
@@ -208,8 +212,9 @@ public final class FareGateManager implements Listener {
     private void attemptClose(UUID openUuid) {
         OpenGate state = open.get(openUuid);
         if (state == null) return;
-        if (!state.display.isValid()) { open.remove(openUuid); return; }
+        if (!state.display.isValid()) {plugin.debug().log("GATE", "Open gate entity invalid: %s",openUuid); open.remove(openUuid); return; }
         if (occupied(state.display)) {
+            plugin.debug().log("GATE", "Close delayed: gate %s occupied",openUuid);
             Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 20L);
             return;
         }
@@ -226,6 +231,7 @@ public final class FareGateManager implements Listener {
         }
         transferSafely(openUuid, closed.getUniqueId());
         open.remove(openUuid);
+        plugin.debug().log("GATE", "Gate closed: %s",openUuid);
     }
 
     public void shutdown() {
@@ -283,6 +289,7 @@ public final class FareGateManager implements Listener {
     }
 
     private void message(Player player, String key, String station, String origin, double fare, double balance) {
+        plugin.debug().log("GATE", "Feedback: player=%s key=%s station=%s",player.getName(),key,station);
         String template = plugin.getConfig().getString("faregates.messages." + key, "<red>Fare gate error.");
         player.sendMessage(mm.deserialize(plugin.lang().brand(template
                 .replace("{station}", stations.stationName(station))

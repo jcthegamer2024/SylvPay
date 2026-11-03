@@ -46,6 +46,7 @@ public final class StationManager {
         numbers.clear();
         locations.clear();
         nextId = Math.max(1, yaml.getInt("next-gate-id", 1));
+        plugin.debug().log("STATION", "Reloaded station and gate definitions");
         ConfigurationSection section = yaml.getConfigurationSection("gates");
         if (section == null) return;
         Set<Integer> used = new HashSet<>();
@@ -153,6 +154,7 @@ public final class StationManager {
         if (candidate == null) return false;
         int preservedId = numbers.get(candidate);
         transfer(candidate, replacementUuid);
+        plugin.debug().log("STATION", "Recovered gate #%d from %s to %s",preservedId,candidate,replacementUuid);
         plugin.getLogger().info("Recovered gate #" + preservedId + " for replacement furniture " + replacementUuid);
         return true;
     }
@@ -181,7 +183,7 @@ public final class StationManager {
         Integer oldNumber = numbers.get(uuid);
         LocationInfo oldLocation = locations.put(uuid, LocationInfo.of(entity.getLocation()));
         if (oldNumber == null) numbers.put(uuid, nextId++);
-        try { save(); }
+        try { save(); plugin.debug().log("STATION", "Assigned gate #%d station=%s direction=%s",numbers.get(uuid),station,direction); }
         catch (IOException ex) {
             if (oldGate == null) assignments.remove(uuid); else assignments.put(uuid, oldGate);
             if (oldNumber == null) numbers.remove(uuid); else numbers.put(uuid, oldNumber);
@@ -201,7 +203,7 @@ public final class StationManager {
         Gate oldGate = assignments.remove(uuid);
         Integer oldId = numbers.remove(uuid);
         LocationInfo oldLocation = locations.remove(uuid);
-        try { save(); }
+        try { save(); plugin.debug().log("STATION", "Removed gate #%s entity=%s",oldId,uuid); }
         catch (IOException ex) {
             if (oldGate != null) assignments.put(uuid, oldGate);
             if (oldId != null) numbers.put(uuid, oldId);
@@ -231,7 +233,7 @@ public final class StationManager {
         assignments.put(replacement, assignment);
         numbers.put(replacement, id);
         if (newLocation != null) locations.put(replacement, newLocation);
-        try { save(); }
+        try { save(); plugin.debug().log("STATION", "Transferred gate #%s from %s to %s",id,previous,replacement); }
         catch (IOException ex) {
             assignments.remove(replacement);
             numbers.remove(replacement);

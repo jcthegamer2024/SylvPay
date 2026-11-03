@@ -177,6 +177,7 @@ public final class MachineGui implements Listener {
     }
 
     private void navigate(Player p, MachineHolder old, Type type, int page) {
+        plugin.debug().log("GUI", "Navigation: player=%s %s -> %s card=%s",p.getName(),old.type,type,selectedId(old));
         old.transferring = true;
         ItemStack card = old.card;
         old.card = null;
@@ -197,6 +198,7 @@ public final class MachineGui implements Listener {
         ItemStack card = holder.card;
         holder.card = null;
         if (card == null) return;
+        plugin.debug().log("CARD", "Returned card to player=%s card=%s",p.getName(),getCardId(card));
         p.getInventory().addItem(card).values().forEach(left ->
                 p.getWorld().dropItemNaturally(p.getLocation(), left));
     }
@@ -298,6 +300,7 @@ public final class MachineGui implements Listener {
             }
             inv.setItem(40, button("back"));
         }
+        plugin.debug().log("GUI", "Opened %s: player=%s card=%s page=%d",type,p.getName(),selectedId(holder),page);
         p.openInventory(inv);
     }
 
@@ -318,7 +321,7 @@ public final class MachineGui implements Listener {
 
     private boolean validCard(Player p, ItemStack item) {
         String id = getCardId(item);
-        if (id == null || item.getAmount() != 1) return false;
+        if (id == null || item.getAmount() != 1) {plugin.debug().log("CARD", "Invalid item offered by %s",p.getName());return false;}
         try {
             if (plugin.db().getBalance(id) == null) { msg(p, "invalid-card"); return false; }
             return true;
@@ -366,11 +369,13 @@ public final class MachineGui implements Listener {
             if (index == SLOT_INSERT) {
                 ItemStack cursor = e.getCursor();
                 if (holder.card != null && (cursor == null || cursor.getType().isAir())) {
+                    plugin.debug().log("CARD", "Card removed from reader: player=%s card=%s",p.getName(),selectedId(holder));
                     updateCursorNextTick(p, holder.card);
                     holder.card = null;
                     renderInsert(holder);
                 } else if (holder.card == null && validCard(p, cursor)) {
                     holder.card = cursor.clone();
+                    plugin.debug().log("CARD", "Card inserted: player=%s card=%s",p.getName(),selectedId(holder));
                     updateCursorNextTick(p, null);
                     renderInsert(holder);
                 } else if (holder.card != null && getCardId(cursor) != null) {
@@ -423,6 +428,7 @@ public final class MachineGui implements Listener {
                 && e.getWhoClicked() instanceof Player p && validCard(p, e.getOldCursor())) {
             e.setCancelled(true);
             holder.card = e.getOldCursor().clone();
+            plugin.debug().log("CARD", "Card drag-inserted: player=%s card=%s",p.getName(),selectedId(holder));
             updateCursorNextTick(p, null);
             renderInsert(holder);
             return;
@@ -433,7 +439,7 @@ public final class MachineGui implements Listener {
     @EventHandler
     public void onClose(org.bukkit.event.inventory.InventoryCloseEvent e) {
         if (!(e.getInventory().getHolder(false) instanceof MachineHolder holder)) return;
-        if (!holder.transferring && e.getPlayer() instanceof Player p) returnCard(p, holder);
+        if (!holder.transferring && e.getPlayer() instanceof Player p) {plugin.debug().log("GUI", "Closed %s: player=%s",holder.type,p.getName());returnCard(p, holder);}
     }
 
     // ------------------------------------------------------------------ actions
@@ -516,6 +522,7 @@ public final class MachineGui implements Listener {
         if (!plugin.economy().has(p, total)) {
             msg(p, "not-enough-money", "{amount}", money(total)); return;
         }
+        plugin.debug().log("ECONOMY", "Card purchase requested: player=%s preload=%.2f deposit=%.2f",p.getName(),preload,cardDeposit());
         EconomyResponse r = plugin.economy().withdrawPlayer(p, total);
         if (!r.transactionSuccess()) {
             msg(p, "not-enough-money", "{amount}", money(total)); return;
@@ -529,6 +536,7 @@ public final class MachineGui implements Listener {
             if (!reversal.transactionSuccess()) plugin.getLogger().severe("MANUAL REPAYMENT REQUIRED: " + p.getUniqueId() + " amount " + total);
             msg(p, "error"); return;
         }
+        plugin.debug().log("ECONOMY", "Card purchase completed: player=%s card=%s charged=%.2f",p.getName(),id,total);
         ItemStack card = createCardItem(id);
         p.getInventory().addItem(card).values()
                 .forEach(left -> p.getWorld().dropItemNaturally(p.getLocation(), left));
@@ -541,6 +549,7 @@ public final class MachineGui implements Listener {
         try {
             Double balance = plugin.db().getBalance(id);
             if (balance == null) { msg(p, "invalid-card"); return; }
+            plugin.debug().log("CARD", "Balance checked: player=%s card=%s balance=%.2f",p.getName(),id,balance);
             msg(p, "balance", "{id}", id, "{balance}", money(balance));
         } catch (SQLException ex) { msg(p, "error"); plugin.getLogger().severe(ex.getMessage()); }
     }
@@ -632,6 +641,7 @@ public final class MachineGui implements Listener {
             if (!plugin.economy().has(p, amount)) {
                 msg(p, "not-enough-money", "{amount}", money(amount)); return;
             }
+            plugin.debug().log("ECONOMY", "Top-up payment requested: player=%s card=%s amount=%.2f",p.getName(),id,amount);
             EconomyResponse response = plugin.economy().withdrawPlayer(p, amount);
             if (!response.transactionSuccess()) {
                 msg(p, "not-enough-money", "{amount}", money(amount)); return;
@@ -647,6 +657,7 @@ public final class MachineGui implements Listener {
                 if (!reversal.transactionSuccess()) plugin.getLogger().severe("MANUAL REPAYMENT REQUIRED: " + p.getUniqueId() + " amount " + amount);
                 throw ex;
             }
+            plugin.debug().log("ECONOMY", "Top-up completed: player=%s card=%s amount=%.2f",p.getName(),id,amount);
             msg(p, "topped-up", "{amount}", money(amount), "{balance}", money(round(current + amount)));
             navigate(p, holder, Type.MAIN, 0);
         } catch (SQLException ex) {
@@ -663,6 +674,7 @@ public final class MachineGui implements Listener {
             }
             Double balance = plugin.db().closeCard(id);
             if (balance == null) { msg(p, "invalid-card"); return; }
+            plugin.debug().log("CARD", "Refund approved: player=%s card=%s balance=%.2f",p.getName(),id,balance);
             holder.card = null; // card is now permanently deactivated
             slot(holder);
             if (balance > 0) {
