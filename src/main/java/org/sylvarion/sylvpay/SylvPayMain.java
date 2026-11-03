@@ -29,6 +29,7 @@ public final class SylvPayMain extends JavaPlugin {
     private FareManager fares;
     private NexoGateBridge nexo;
     private FareGateManager fareGates;
+    private ValidatorManager validators;
     private final MiniMessage mm=MiniMessage.miniMessage();
 
     @Override public void onEnable(){
@@ -48,6 +49,7 @@ public final class SylvPayMain extends JavaPlugin {
         getServer().getPluginManager().registerEvents(gui,this);
         stations=new StationManager(this);
         fares=new FareManager(this);
+        validators=new ValidatorManager(this);
         nexo=new NexoGateBridge(this);
         fareGates=new FareGateManager(this,stations,fares,nexo);
         getServer().getPluginManager().registerEvents(fareGates,this);
@@ -65,6 +67,14 @@ public final class SylvPayMain extends JavaPlugin {
     public CardDatabase db(){return database;}
     public NamespacedKey cardKey(){return cardKey;}
     public StationManager stations(){return stations;}
+    public FareManager fares(){return fares;}
+    public ValidatorManager validators(){return validators;}
+    /** Open the ticket machine GUI without executing a command. */
+    public void openTicketMachine(Player player) {
+        if (!player.isOnline() || !player.hasPermission("sylvpay.use")) return;
+        debug.log("MACHINE", "Opening ticket machine GUI for %s", player.getName());
+        gui.openMain(player);
+    }
     private void registerPermissions(){
         var pm=getServer().getPluginManager();
         if(pm.getPermission("sylvpay.use")==null)pm.addPermission(new Permission("sylvpay.use","Use SylvPay",PermissionDefault.TRUE));
@@ -139,6 +149,39 @@ public final class SylvPayMain extends JavaPlugin {
         }
     }
 
+    private ItemDisplay validatorTarget(Player player) {
+        ItemDisplay display = nexo.target(player);
+        if (display == null) { feedback(player, "<red>Look at a Nexo validator within 6 blocks."); return null; }
+        String expected = getConfig().getString("validators.furniture-id", "sylv_validator");
+        if (!expected.equals(nexo.furnitureId(display))) {
+            feedback(player, "<red>Furniture must have Nexo ID <white>"+expected); return null;
+        }
+        return display;
+    }
+    private void setValidator(Player player, String station) {
+        if (!stations.hasStation(station)) { feedback(player, "<red>Unknown station: <white>"+station); return; }
+        ItemDisplay display = validatorTarget(player); if (display == null) return;
+        try {
+            validators.assign(display, station);
+            feedback(player, "<green>Validator #"+validators.number(display)+" assigned to <gold>"+stations.stationName(station));
+        } catch (IOException ex) { getLogger().severe("Cannot save validators.yml: "+ex); feedback(player, "<red>Cannot save validators.yml."); }
+    }
+    private void removeValidator(Player player) {
+        ItemDisplay display = validatorTarget(player); if (display == null) return;
+        try { feedback(player, validators.remove(display) ? "<green>Validator assignment removed." : "<yellow>Validator was not registered."); }
+        catch (IOException ex) { getLogger().severe("Cannot save validators.yml: "+ex); feedback(player, "<red>Cannot save validators.yml."); }
+    }
+    private void listValidators(CommandSender sender) {
+        List<ValidatorManager.RegisteredValidator> list = validators.registered();
+        legacyFeedback(sender, "§6SylvPay — "+list.size()+" registered validator(s):");
+        for (var v : list) legacyFeedback(sender, "§e#"+v.id()+" §f"+stations.stationName(v.station())+
+            " §7("+v.station()+") — "+v.world()+" "+(int)Math.floor(v.x())+", "+(int)Math.floor(v.y())+", "+(int)Math.floor(v.z()));
+    }
+    private void deleteValidator(CommandSender sender, int id) {
+        try { legacyFeedback(sender, validators.delete(id) ? "§aValidator #"+id+" unregistered; furniture left in place." : "§cNo validator with ID #"+id+"."); }
+        catch (IOException ex) { getLogger().severe("Cannot save validators.yml: "+ex); legacyFeedback(sender, "§cCannot save validators.yml."); }
+    }
+
     private void debugCommand(CommandSender sender, Boolean requested) {
         if (requested == null) {
             sender.sendMessage("[SylvPay] Debug logging is " + (debug.enabled() ? "ON" : "OFF") + ".");
@@ -151,7 +194,7 @@ public final class SylvPayMain extends JavaPlugin {
     private void registerCommands(){
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS,event->{
             event.registrar().register(Commands.literal("sylvpay")
-                    .executes(ctx->{ctx.getSource().getSender().sendMessage("/sylvpay machine | reload | stations | gates <station> | gate set/remove/delete | debug [on|off|status]");return Command.SINGLE_SUCCESS;})
+                    .executes(ctx->{ctx.getSource().getSender().sendMessage("/sylvpay machine | reload | stations | gates <station> | gate set/remove/delete | validator set/remove/list/delete | debug [on|off|status]");return Command.SINGLE_SUCCESS;})
                     .then(Commands.literal("debug")
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
                             .executes(ctx->{debugCommand(ctx.getSource().getSender(), !debug.enabled());return Command.SINGLE_SUCCESS;})
@@ -159,11 +202,11 @@ public final class SylvPayMain extends JavaPlugin {
                             .then(Commands.literal("off").executes(ctx->{debugCommand(ctx.getSource().getSender(), false);return Command.SINGLE_SUCCESS;}))
                             .then(Commands.literal("status").executes(ctx->{debugCommand(ctx.getSource().getSender(), null);return Command.SINGLE_SUCCESS;})))
                     .then(Commands.literal("machine")
-                            .requires(src->src.getSender() instanceof Player && src.getSender().hasPermission("sylvpay.use"))
-                            .executes(ctx->{debug.log("COMMAND", "%s opened ticket machine",ctx.getSource().getSender().getName());gui.openMain((Player)ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))
+                            .requires(src->src.getSender() instanceof Player && src.getSender().hasPermission("sylvpay.admin"))
+                            .executes(ctx->{openTicketMachine((Player)ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))
                     .then(Commands.literal("reload")
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
-                            .executes(ctx->{reloadConfig();debug.reload();lang.reload();stations.reload();fares.reload();debug.log("CONFIG", "Reloaded config, language, stations and fares");legacyFeedback(ctx.getSource().getSender(), "SylvPay config, stations and fares reloaded.");return Command.SINGLE_SUCCESS;}))
+                            .executes(ctx->{reloadConfig();debug.reload();lang.reload();stations.reload();fares.reload();validators.reload();debug.log("CONFIG", "Reloaded config, language, stations and fares");legacyFeedback(ctx.getSource().getSender(), "SylvPay config, stations and fares reloaded.");return Command.SINGLE_SUCCESS;}))
                     .then(Commands.literal("stations")
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
                             .executes(ctx->{listStations(ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))
@@ -171,6 +214,20 @@ public final class SylvPayMain extends JavaPlugin {
                             .requires(src->src.getSender().hasPermission("sylvpay.admin"))
                             .then(Commands.argument("station",StringArgumentType.word())
                                     .executes(ctx->{listGates(ctx.getSource().getSender(),StringArgumentType.getString(ctx,"station"));return Command.SINGLE_SUCCESS;})))
+                    .then(Commands.literal("validator")
+                            .requires(src->src.getSender().hasPermission("sylvpay.admin"))
+                            .then(Commands.literal("list")
+                                    .executes(ctx->{listValidators(ctx.getSource().getSender());return Command.SINGLE_SUCCESS;}))
+                            .then(Commands.literal("delete")
+                                    .then(Commands.argument("id",IntegerArgumentType.integer(1))
+                                            .executes(ctx->{deleteValidator(ctx.getSource().getSender(),IntegerArgumentType.getInteger(ctx,"id"));return Command.SINGLE_SUCCESS;})))
+                            .then(Commands.literal("set")
+                                    .requires(src->src.getSender() instanceof Player)
+                                    .then(Commands.argument("station",StringArgumentType.word())
+                                            .executes(ctx->{setValidator((Player)ctx.getSource().getSender(),StringArgumentType.getString(ctx,"station"));return Command.SINGLE_SUCCESS;})))
+                            .then(Commands.literal("remove")
+                                    .requires(src->src.getSender() instanceof Player)
+                                    .executes(ctx->{removeValidator((Player)ctx.getSource().getSender());return Command.SINGLE_SUCCESS;})))
                     .then(Commands.literal("gate")
                             .requires(src->src.getSender() instanceof Player && src.getSender().hasPermission("sylvpay.admin"))
                             .then(Commands.literal("set")

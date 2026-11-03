@@ -6,6 +6,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.SoundCategory;
 import org.bukkit.NamespacedKey;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -342,6 +343,27 @@ public final class MachineGui implements Listener {
         return yaml.contains(base + ".zone") ? name + " (Zone " + yaml.getInt(base + ".zone") + ")" : name;
     }
 
+    // Configurable local UI feedback. Does not broadcast to nearby players.
+    private void playButtonSound(Player player, MachineHolder holder, int slot) {
+        if (!cfg().getBoolean("gui.sounds.enabled", true)) return;
+        ItemStack item = holder.inventory.getItem(slot);
+        if (item == null || item.getType().isAir()) return;
+
+        boolean keypad = (holder.type == Type.CREATE || holder.type == Type.TOPUP)
+                && (slot == SLOT_ZERO || slot == SLOT_DECIMAL || slot == SLOT_CLEAR
+                || java.util.Arrays.stream(KEYPAD_DIGITS).anyMatch(s -> s == slot));
+        String path = keypad ? "gui.sounds.keypad" : "gui.sounds.button";
+        String sound = cfg().getString(path + ".sound", "minecraft:ui.button.click");
+        if (sound == null || sound.isBlank()) return;
+        float volume = (float) Math.max(0, Math.min(2, cfg().getDouble(path + ".volume", 0.6)));
+        float pitch = (float) Math.max(0.5, Math.min(2, cfg().getDouble(path + ".pitch", keypad ? 1.3 : 1.0)));
+        try {
+            player.playSound(player.getLocation(), sound, SoundCategory.MASTER, volume, pitch);
+        } catch (IllegalArgumentException ex) {
+            plugin.getLogger().warning("Invalid SylvPay GUI sound '" + sound + "': " + ex.getMessage());
+        }
+    }
+
     // ------------------------------------------------------------------ events
 
     @EventHandler
@@ -350,6 +372,9 @@ public final class MachineGui implements Listener {
         e.setCancelled(true);
         if (!(e.getWhoClicked() instanceof Player p)) return;
         if (e.getClick().isKeyboardClick() || e.getClick().isShiftClick()) return;
+        if (e.getClickedInventory() == e.getView().getTopInventory()) {
+            playButtonSound(p, holder, e.getSlot());
+        }
         if (holder.type == Type.CREATE || holder.type == Type.TOPUP) {
             if (e.getClickedInventory() == e.getView().getTopInventory()) {
                 if (holder.type == Type.CREATE) handleCreateClick(p, holder, e.getSlot());

@@ -32,6 +32,41 @@ public final class NexoGateBridge implements Listener {
     public void onInteract(NexoFurnitureInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
         ItemDisplay display = event.getBaseEntity();
+        if (display == null || !display.isValid()) return;
+
+        // Ticket machines work anywhere, with no per-instance registration.
+        // Handle them before fare-gate recovery so the two systems stay independent.
+        String machineId = plugin.getConfig().getString("ticket-machine.furniture-id", "").trim();
+        if (!machineId.isEmpty() && machineId.equals(furnitureId(display))) {
+            event.setCancelled(true);
+            Player player = event.getPlayer();
+            plugin.debug().log("MACHINE", "Ticket machine clicked: player=%s entity=%s furniture=%s",
+                    player.getName(), display.getUniqueId(), machineId);
+            // Open after the Nexo interaction event has finished.
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && display.isValid()) plugin.openTicketMachine(player);
+            });
+            return;
+        }
+
+        // Validators are stationary tap points: no barrier or gate direction.
+        String validatorId = plugin.getConfig().getString("validators.furniture-id", "sylv_validator").trim();
+        if (plugin.getConfig().getBoolean("validators.enabled", true)
+                && !validatorId.isEmpty() && validatorId.equals(furnitureId(display))) {
+            boolean assigned = plugin.validators().station(display) != null;
+            if (!assigned) {
+                try { assigned = plugin.validators().recoverAt(display); }
+                catch (IOException ex) { plugin.getLogger().severe("Cannot recover validator: " + ex.getMessage()); return; }
+            }
+            if (!assigned) return;
+            event.setCancelled(true);
+            Player player = event.getPlayer();
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && display.isValid()) plugin.validators().tap(player, display);
+            });
+            return;
+        }
+
         if (!gates.isManaged(display)) {
             // Only consider the configured closed gate furniture, never arbitrary Nexo items.
             String closed = plugin.getConfig().getString("faregates.models.closed", "sylv_faregate_closed");

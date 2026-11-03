@@ -14,3 +14,5 @@ stations:
   moonlake:
     name: "Moon Lake"
     zone: 2
+
+# Validator assignments are stored separately in validators.yml (auto-created).

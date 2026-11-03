@@ -1,7 +1,9 @@
-
 # ==========================================
 # SYLVPAY CONFIGURATION
 # ==========================================
+
+debug:
+  enabled: false
 
 currency:
   symbol: "£"
@@ -11,14 +13,34 @@ currency:
   space: false
 
 # ==========================================
+# NEXO TICKET MACHINE FURNITURE
+# ==========================================
+# Right-clicking ANY placed Nexo furniture with this ID opens the GUI.
+# No Nexo clickActions or individual machine registrations are required.
+# Set to "" to disable furniture access.
+ticket-machine:
+  furniture-id: "sylv_ticket_machine"
+
+# ==========================================
 # TICKET MACHINE GUI
 # ==========================================
-
 gui:
+  # Sounds heard only by the player using the ticket machine.
+  sounds:
+    enabled: true
+    button:
+      sound: "minecraft:ui.button.click"
+      volume: 0.6
+      pitch: 1.0
+    keypad:
+      sound: "minecraft:ui.button.click"
+      volume: 0.6
+      pitch: 1.35
+
   title: "<dark_gray>SylvPay Ticket Machine"
   topup-title: "<dark_gray>Top Up Your Card"
   insert-title: "<dark_gray>Insert Tap2Go Card"
-
+  create-title: "<dark_gray>Create Tap2Go Card"
   custom:
     enabled: false
     glyph: "sylvpay_machine"
@@ -30,7 +52,6 @@ gui:
 # ==========================================
 # TAP2GO CARD
 # ==========================================
-
 card:
   material: PAPER
   item-model: "sylvpay:tap2go_card"
@@ -39,6 +60,7 @@ card:
     - "<gray>Card ID: <white>{id}"
     - "<dark_gray>Top up at any ticket machine."
   price: 2.5
+  max-creation-balance: 500.0
   buy-options: [5, 10, 25, 50]
 
 topup-options: [5, 10, 25, 50]
@@ -47,7 +69,6 @@ max-balance: 1000
 # ==========================================
 # TICKET MACHINE BUTTONS
 # ==========================================
-
 buttons:
   buy:
     material: PAPER
@@ -57,21 +78,18 @@ buttons:
       - "<gray>Card: <white>{price}"
       - "<gray>Preload: <white>{amount}"
       - "<gray>Total: <green>{total}"
-
   balance:
     material: CLOCK
     item-model: ""
     name: "<aqua>Check Balance"
     lore:
       - "<gray>Uses the card in your inventory."
-
   topup:
     material: EMERALD
     item-model: ""
     name: "<green>Top Up Card"
     lore:
       - "<gray>Add money from your balance."
-
   refund:
     material: REDSTONE
     item-model: ""
@@ -79,14 +97,12 @@ buttons:
     lore:
       - "<gray>Takes your card and returns"
       - "<gray>its balance to your account."
-
   topup-amount:
     material: GOLD_INGOT
     item-model: ""
     name: "<green>Add <white>{amount}"
     lore:
       - "<gray>Click to top up."
-
   back:
     material: ARROW
     item-model: ""
@@ -96,7 +112,6 @@ buttons:
 # ==========================================
 # GENERAL MESSAGES
 # ==========================================
-
 messages:
   prefix: "<gold>[SylvPay] </gold>"
   no-card: "<red>You don't have a SylvPay card in your inventory."
@@ -115,23 +130,31 @@ messages:
 # ==========================================
 # NEXO FARE GATES
 # ==========================================
-
 faregates:
   enabled: false
-
-  # Change these to your own Nexo IDs.
-  # The closed model must be Nexo furniture.
   models:
     closed: "sylv_faregate_closed"
     open: "sylv_faregate_open"
-
   tap-cooldown-ms: 1500
-
   opening:
     timeout-ticks: 100
-    crossing-radius: 1.5
-
-  # All messages support MiniMessage.
+    # How far the rider must clear the gate before it closes.
+    clearance-radius: 0.85
+    # Maximum sideways distance for detecting the rider crossing.
+    lane-half-width: 1.0
+    # Minimum horizontal space checked before closing the barrier.
+    crossing-radius: 1.5 # Legacy setting; current code does not use this.
+  sounds:
+    tap-in:
+      enabled: true
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.8
+      pitch: 1.4
+    tap-out:
+      enabled: true
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.8
+      pitch: 1.0
   messages:
     tap-in: "<green>✔ Tapped into <gold>{station}</gold>"
     tap-out: "<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}"
@@ -143,4 +166,33 @@ faregates:
     journey-expired: "<red>Journey expired. Contact staff to resolve it."
     busy: "<yellow>This gate is in use."
     model-missing: "<red>Open gate Nexo item ID not found."
+    error: "<red>Unable to process the tap. Contact staff."
+
+# ==========================================
+# NEXO STANDALONE VALIDATORS
+# ==========================================
+validators:
+  enabled: true
+  furniture-id: "sylv_validator"
+  tap-cooldown-ms: 1500
+  sounds:
+    tap-in:
+      enabled: true
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.8
+      pitch: 1.4
+    tap-out:
+      enabled: true
+      sound: "minecraft:block.note_block.bell"
+      volume: 0.8
+      pitch: 1.0
+  messages:
+    tap-in: "<green>✔ Tapped into <gold>{station}</gold>"
+    tap-out: "<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}"
+    no-card: "<red>Hold your Tap2Go card to tap."
+    invalid-card: "<red>This card is invalid."
+    already-in: "<red>This card already has an active journey."
+    no-journey: "<red>No active journey found."
+    insufficient-balance: "<red>Insufficient card balance. Balance: {balance}"
+    journey-expired: "<red>Journey expired. Contact staff."
     error: "<red>Unable to process the tap. Contact staff."

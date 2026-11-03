@@ -23,7 +23,14 @@ public final class FareManager {
         else if (fares.getBoolean("fares.reverse-routes", true)
                 && fares.contains("fares.routes." + to + "." + from))
             amount = fares.getDouble("fares.routes." + to + "." + from);
-        else amount = fares.getDouble("fares.default-fare", 3);
+        else {
+            Integer fromZone = plugin.stations().stationZone(from);
+            Integer toZone = plugin.stations().stationZone(to);
+            int zones = (fromZone == null || toZone == null) ? 0 : Math.abs(fromZone - toZone) + 1;
+            String zonePath = "fares.zones." + zones;
+            if (zones > 0 && fares.contains(zonePath)) amount = fares.getDouble(zonePath);
+            else amount = fares.getDouble("fares.default-fare", 3);
+        }
         if (!Double.isFinite(amount) || amount < 0) throw new IllegalArgumentException("Invalid fare " + from + " -> " + to);
         double result = Math.round(amount * 100.0) / 100.0;
         plugin.debug().log("FARES", "Calculated fare %s -> %s: %.2f",from,to,result);
