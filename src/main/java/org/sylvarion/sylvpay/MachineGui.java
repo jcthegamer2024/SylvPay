@@ -3,6 +3,12 @@ package org.sylvarion.sylvpay;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import com.nexomc.nexo.glyphs.GlyphTag;
+import com.nexomc.nexo.glyphs.ShiftTag;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -35,6 +41,7 @@ public final class MachineGui implements Listener {
 
     private static final class MachineHolder implements InventoryHolder {
         final Type type;
+        Type afterInsert;
         Inventory inventory;
         ItemStack card;
         int page;
@@ -177,12 +184,18 @@ public final class MachineGui implements Listener {
                 : holder.card.clone());
     }
 
+    private void navigateToInsert(Player p, MachineHolder old, Type target) {
+        old.afterInsert = target;
+        navigate(p, old, Type.INSERT, 0);
+    }
+
     private void navigate(Player p, MachineHolder old, Type type, int page) {
         plugin.debug().log("GUI", "Navigation: player=%s %s -> %s card=%s",p.getName(),old.type,type,selectedId(old));
         old.transferring = true;
         ItemStack card = old.card;
         old.card = null;
-        Bukkit.getScheduler().runTask(plugin, () -> open(p, type, card, page));
+        Type afterInsert = type == Type.INSERT ? old.afterInsert : null;
+        Bukkit.getScheduler().runTask(plugin, () -> open(p, type, card, page, afterInsert));
     }
 
     // Paper/Bukkit: update the cursor through HumanEntity rather than the
@@ -204,31 +217,144 @@ public final class MachineGui implements Listener {
                 p.getWorld().dropItemNaturally(p.getLocation(), left));
     }
 
-    // Optional Nexo GUI glyph titles. Nexo's packet glyph processing is responsible
-    // for converting <glyph:id> and <shift:n> tags to its font characters.
-    // All standard MiniMessage tags are handled by Adventure MiniMessage.
-    // When Nexo is missing, use the ordinary GUI title instead.
+    // Nexo glyph tags are not standard MiniMessage tags. Parse them with Nexo's
+    // resolvers, and NEVER pass glyph IDs through the branding replacement.
     private Component guiTitle(boolean topup) {
-        String normalKey = topup ? "gui.topup-title" : "gui.title";
-        String fallback = topup ? "<dark_gray>Top Up Your Card" : "<dark_gray>SylvPay Ticket Machine";
-        String normal = cfg().getString(normalKey, fallback);
+        return guiTitle(topup ? "topup" : "main");
+    }
 
+    private Component guiTitle(String screen) {
+        String normalKey = switch (screen) {
+            case "insert" -> "gui.insert-title";
+            case "create" -> "gui.create-title";
+            case "topup" -> "gui.topup-title";
+            default -> "gui.title";
+        };
+        String normal = cfg().getString(normalKey, "<dark_gray>SylvPay Ticket Machine");
         if (!cfg().getBoolean("gui.custom.enabled", false)
-                || !plugin.getServer().getPluginManager().isPluginEnabled("Nexo")) {
+                || !plugin.getServer().getPluginManager().isPluginEnabled("Nexo")) return text(normal);
+        String base = switch (screen) {
+            case "insert" -> "gui.custom.insert";
+            case "create" -> cfg().isConfigurationSection("gui.custom.create") ? "gui.custom.create" : "gui.custom.numpad";
+            case "topup" -> "gui.custom.numpad";
+            default -> "gui.custom";
+        };
+        if (!base.equals("gui.custom") && !cfg().getBoolean(base + ".enabled", false)) return text(normal);
+        String configured = cfg().getString(base + ".glyph",
+                screen.equals("topup") ? cfg().getString("gui.custom.topup-glyph", "") :
+                        screen.equals("main") ? cfg().getString("gui.custom.glyph", "") : "").trim();
+        if (configured.isBlank()) return text(normal);
+
+        // Accept either "tap2gomainscreen", "<glyph:tap2gomainscreen>",
+        // or "<shift:-9>tap2gomainscreen" without corrupting the glyph ID.
+        // An inline shift takes precedence over gui.custom.shift, so it is never doubled.
+        boolean hasInlineShift = configured.matches("(?s).*<shift:[^>]+>.*");
+        StringBuilder inlineTags = new StringBuilder();
+        java.util.regex.Matcher shiftMatcher = java.util.regex.Pattern
+                .compile("<shift:[^>]+>").matcher(configured);
+        while (shiftMatcher.find()) inlineTags.append(shiftMatcher.group());
+        String glyphId = configured.replaceAll("<shift:[^>]+>", "").trim();
+        String glyphTag = glyphId.startsWith("<glyph:") && glyphId.endsWith(">")
+                ? glyphId : "<glyph:" + glyphId + ">";
+        // A numeric title-shift is easier to configure than a raw Nexo tag.
+        // Existing inline shifts still work, but take precedence to prevent doubling.
+        String shiftTag;
+        if (hasInlineShift) {
+            shiftTag = inlineTags.toString();
+        } else if (cfg().isSet(base + ".title-shift")) {
+            int shift = cfg().getInt(base + ".title-shift", 0);
+            shiftTag = shift == 0 ? "" : "<shift:" + shift + ">";
+        } else {
+            shiftTag = cfg().getString(base + ".shift", cfg().getString("gui.custom.shift", "")); // Legacy config
+        }
+        String raw = cfg().getString(base + ".prefix", cfg().getString("gui.custom.prefix", "<!italic><!bold><white>"))
+                + shiftTag + glyphTag + cfg().getString(base + ".suffix", cfg().getString("gui.custom.suffix", ""));
+        try {
+            return MiniMessage.builder().tags(net.kyori.adventure.text.minimessage.tag.resolver.TagResolver.resolver(
+                            net.kyori.adventure.text.minimessage.tag.resolver.TagResolver.standard(),
+                            GlyphTag.INSTANCE.getRESOLVER(), ShiftTag.INSTANCE.getRESOLVER()))
+                    .build().deserialize(raw).decoration(TextDecoration.ITALIC, false);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning("Cannot render Nexo GUI glyph: " + ex.getMessage());
             return text(normal);
         }
+    }
 
-        String key = topup ? "gui.custom.topup-glyph" : "gui.custom.glyph";
-        String glyph = cfg().getString(key, "").trim();
-        if (glyph.isBlank()) return text(normal);
+    private static final Map<String, List<Integer>> DEFAULT_MAIN_SLOTS = Map.of(
+            "create-card", List.of(19,20,28,29),
+            "balance", List.of(23,24,32,33),
+            "topup", List.of(37,38,46,47),
+            "refund", List.of(41,42,50,51),
+            "history", List.of(35),
+            "card-reader", List.of());
 
-        // Accept either a glyph ID or a complete <glyph:id> tag.
-        if (!glyph.startsWith("<glyph:")) glyph = "<glyph:" + glyph + ">";
+    // Read the server's personal config.yml explicitly for GUI slot overrides.
+    // Bukkit's bundled resource defaults must never mask a personal slot value.
+    private List<Integer> configuredMainSlots(String action) {
+        String path = "gui.main.slots." + action;
+        java.io.File personalFile = new java.io.File(plugin.getDataFolder(), "config.yml");
+        org.bukkit.configuration.file.YamlConfiguration personal =
+                org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(personalFile);
 
-        String prefix = cfg().getString("gui.custom.prefix", "<!italic><!bold><white>");
-        String shift = cfg().getString("gui.custom.shift", "");
-        String suffix = cfg().getString("gui.custom.suffix", "");
-        return text(prefix + shift + glyph + suffix);
+        if (personal.isSet(path)) {
+            if (!personal.isList(path)) {
+                plugin.getLogger().warning("Personal config has invalid GUI slot list at " + path);
+                return List.of();
+            }
+            return personal.getIntegerList(path);
+        }
+
+        // If the path is absent from the personal file, fall back to the
+        // in-memory config and finally to the built-in Java defaults.
+        if (cfg().contains(path)) return cfg().getIntegerList(path);
+        return DEFAULT_MAIN_SLOTS.getOrDefault(action, List.of());
+    }
+
+    private Map<Integer, String> mainActions() {
+        Map<Integer, String> actions = new HashMap<>();
+        // Map.of() iteration order is unspecified. Apply ordinary actions first,
+        // then Journey History last so its dedicated 1x1 slot takes precedence.
+        for (String action : List.of("create-card", "balance", "topup", "refund", "card-reader", "history")) {
+            List<Integer> slots = configuredMainSlots(action);
+            for (int index : slots) {
+                if (index < 0 || index >= 54) {
+                    plugin.getLogger().warning("Invalid main GUI slot " + index + " for " + action);
+                    continue;
+                }
+                if (action.equals("history")) {
+                    String previous = actions.put(index, action);
+                    if (previous != null && !previous.equals(action))
+                        plugin.getLogger().warning("Journey History overrides " + previous + " at main GUI slot " + index);
+                } else {
+                    String previous = actions.putIfAbsent(index, action);
+                    if (previous != null && !previous.equals(action))
+                        plugin.getLogger().warning("Main GUI slot " + index + " overlaps " + previous + " and " + action);
+                }
+            }
+        }
+        return actions;
+    }
+
+    private void renderMain(MachineHolder holder) {
+        boolean show = cfg().getBoolean("gui.main.show-items", false);
+        if (!show) return; // Empty slots remain clickable; the resource-pack glyph draws the buttons.
+        for (var entry : mainActions().entrySet()) {
+            String action = entry.getValue();
+            ItemStack item = switch (action) {
+                case "create-card" -> buttonOrDefault("create-card", Material.PAPER,
+                        "<gold>Create New Tap2Go Card", "<gray>Choose an initial balance");
+                case "balance" -> button("balance");
+                case "topup" -> button("topup");
+                case "refund" -> button("refund");
+                case "history" -> simple(Material.BOOK, "<aqua>Transaction History");
+                case "card-reader" -> holder.card == null
+                        ? simple(Material.GRAY_STAINED_GLASS_PANE, "<yellow>Insert Tap2Go card")
+                        : holder.card.clone();
+                default -> null;
+            };
+            if (item != null && !(action.equals("create-card") && holder.card != null))
+                holder.inventory.setItem(entry.getKey(), item);
+        }
     }
 
     // ------------------------------------------------------------------ menus
@@ -236,32 +362,28 @@ public final class MachineGui implements Listener {
     public void openMain(Player p) { open(p, Type.MAIN, null, 0); }
 
     private void open(Player p, Type type, ItemStack card, int page) {
+        open(p, type, card, page, null);
+    }
+
+    private void open(Player p, Type type, ItemStack card, int page, Type afterInsert) {
         MachineHolder holder = new MachineHolder(type, card, page);
-        int size = (type == Type.CREATE || type == Type.TOPUP) ? 54 : type == Type.HISTORY ? 45 : 27;
+        holder.afterInsert = afterInsert;
+        // Keep every SylvPay menu the same size as the main ticket machine.
+        // Nexo title glyphs and click slots do not change with this setting.
+        int size = 54;
         Component title = switch (type) {
             case MAIN -> guiTitle(false);
-            case INSERT -> text(cfg().getString("gui.insert-title", "<dark_gray>Insert Tap2Go Card"));
-            case CREATE -> text(cfg().getString("gui.create-title", "<dark_gray>Create Tap2Go Card"));
-            case TOPUP -> guiTitle(true);
+            case INSERT -> guiTitle("insert");
+            case CREATE -> guiTitle("create");
+            case TOPUP -> guiTitle("topup");
             case HISTORY -> text("<dark_gray>Tap2Go Transaction History");
             case REFUND_CONFIRM -> text("<dark_red>Confirm Card Refund");
         };
         Inventory inv = Bukkit.createInventory(holder, size, title);
         holder.inventory = inv;
-        if (type != Type.CREATE && type != Type.INSERT) slot(holder);
+        if (type != Type.CREATE && type != Type.INSERT && type != Type.MAIN) slot(holder);
         if (type == Type.MAIN) {
-            // Only offer new card creation when no card is inserted.
-            if (holder.card == null) {
-                inv.setItem(SLOT_CREATE, buttonOrDefault("create-card", Material.PAPER,
-                        "<gold>Create New Tap2Go Card", "<gray>Choose an initial balance using the keypad",
-                        "<gray>Card deposit: <yellow>" + money(cardDeposit()),
-                        "<gray>Maximum initial balance: <white>" + money(maxCreationBalance())));
-            }
-            inv.setItem(SLOT_BALANCE, button("balance"));
-            inv.setItem(SLOT_TOPUP, button("topup"));
-            inv.setItem(SLOT_REFUND, button("refund"));
-            inv.setItem(SLOT_HISTORY, simple(Material.BOOK, "<aqua>Transaction History",
-                    "<gray>View journeys and top-ups for inserted card"));
+            renderMain(holder);
         } else if (type == Type.INSERT) {
             renderInsert(holder);
         } else if (type == Type.CREATE) {
@@ -307,17 +429,43 @@ public final class MachineGui implements Listener {
 
     private void renderInsert(MachineHolder holder) {
         Inventory inv = holder.inventory;
-        inv.setItem(SLOT_INSERT, holder.card == null
+        if (cfg().getBoolean("gui.insert.show-items", true) || holder.card != null) inv.setItem(insertCardSlot(), holder.card == null
                 ? simple(Material.HOPPER, "<yellow>Drop your Tap2Go card here",
                 "<gray>Pick up a card from your inventory",
                 "<gray>and place or drag it into this slot")
                 : holder.card.clone());
-        inv.setItem(11, simple(Material.BOOK, "<aqua>Card reader",
+        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(11, simple(Material.BOOK, "<aqua>Card reader",
                 holder.card == null ? "<gray>No card inserted" : "<green>Card inserted",
                 "<gray>Only the card in the reader can be used"));
-        inv.setItem(15, simple(Material.LIME_CONCRETE, "<green>Continue",
+        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(15, simple(Material.LIME_CONCRETE, "<green>Continue",
                 "<gray>Return to the ticket machine"));
-        inv.setItem(22, button("back"));
+        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(insertBackSlot(), button("back"));
+    }
+
+    private int inventorySize(String path, int fallback) {
+        int value = cfg().getInt(path, fallback);
+        return value >= 9 && value <= 54 && value % 9 == 0 ? value : fallback;
+    }
+
+    private int insertCardSlot() {
+        int slot = cfg().getInt("gui.insert.card-slot", SLOT_INSERT);
+        return slot >= 0 && slot < 54 ? slot : SLOT_INSERT;
+    }
+
+    private int insertBackSlot() {
+        int slot = cfg().getInt("gui.insert.back-slot", 22);
+        return slot >= 0 && slot < 54 ? slot : 22;
+    }
+
+    private void inserted(Player p, MachineHolder holder) {
+        if (holder.afterInsert == Type.MAIN) {
+            checkBalance(p, holder);
+            navigate(p, holder, Type.MAIN, 0);
+        } else if (holder.afterInsert != null) {
+            navigate(p, holder, holder.afterInsert, 0);
+        } else {
+            renderInsert(holder);
+        }
     }
 
     private boolean validCard(Player p, ItemStack item) {
@@ -347,11 +495,11 @@ public final class MachineGui implements Listener {
     private void playButtonSound(Player player, MachineHolder holder, int slot) {
         if (!cfg().getBoolean("gui.sounds.enabled", true)) return;
         ItemStack item = holder.inventory.getItem(slot);
-        if (item == null || item.getType().isAir()) return;
+        if ((item == null || item.getType().isAir()) && holder.type != Type.MAIN
+                && holder.type != Type.CREATE && holder.type != Type.TOPUP && holder.type != Type.INSERT) return;
 
         boolean keypad = (holder.type == Type.CREATE || holder.type == Type.TOPUP)
-                && (slot == SLOT_ZERO || slot == SLOT_DECIMAL || slot == SLOT_CLEAR
-                || java.util.Arrays.stream(KEYPAD_DIGITS).anyMatch(s -> s == slot));
+                && translateKeypadSlot(slot) >= 0;
         String path = keypad ? "gui.sounds.keypad" : "gui.sounds.button";
         String sound = cfg().getString(path + ".sound", "minecraft:ui.button.click");
         if (sound == null || sound.isBlank()) return;
@@ -377,8 +525,10 @@ public final class MachineGui implements Listener {
         }
         if (holder.type == Type.CREATE || holder.type == Type.TOPUP) {
             if (e.getClickedInventory() == e.getView().getTopInventory()) {
-                if (holder.type == Type.CREATE) handleCreateClick(p, holder, e.getSlot());
-                else handleTopupClick(p, holder, e.getSlot());
+                int logical = translateKeypadSlot(e.getSlot());
+                if (logical < 0) return;
+                if (holder.type == Type.CREATE) handleCreateClick(p, holder, logical);
+                else handleTopupClick(p, holder, logical);
             }
             return;
         }
@@ -391,7 +541,7 @@ public final class MachineGui implements Listener {
             }
             if (e.getClickedInventory() != e.getView().getTopInventory()) return;
             int index = e.getSlot();
-            if (index == SLOT_INSERT) {
+            if (index == insertCardSlot()) {
                 ItemStack cursor = e.getCursor();
                 if (holder.card != null && (cursor == null || cursor.getType().isAir())) {
                     plugin.debug().log("CARD", "Card removed from reader: player=%s card=%s",p.getName(),selectedId(holder));
@@ -402,11 +552,11 @@ public final class MachineGui implements Listener {
                     holder.card = cursor.clone();
                     plugin.debug().log("CARD", "Card inserted: player=%s card=%s",p.getName(),selectedId(holder));
                     updateCursorNextTick(p, null);
-                    renderInsert(holder);
+                    inserted(p, holder);
                 } else if (holder.card != null && getCardId(cursor) != null) {
                     p.sendMessage(text("<yellow>Remove the inserted card first."));
                 }
-            } else if (index == 15 || index == 22) {
+            } else if (index == insertBackSlot() || (index == 15 && cfg().getBoolean("gui.insert.show-items", true))) {
                 navigate(p, holder, Type.MAIN, 0);
             }
             return;
@@ -414,21 +564,25 @@ public final class MachineGui implements Listener {
         // Card insertion/removal is only possible inside the reader GUI.
         if (e.getClickedInventory() != e.getView().getTopInventory()) return;
         int index = e.getSlot();
+        if (holder.type == Type.MAIN) {
+            String action = mainActions().get(index);
+            if (action == null) return;
+            switch (action) {
+                case "card-reader" -> navigate(p, holder, Type.INSERT, 0);
+                case "create-card" -> { if (holder.card == null) navigate(p, holder, Type.CREATE, 0); }
+                case "balance" -> navigateToInsert(p, holder, Type.MAIN);
+                case "topup" -> navigateToInsert(p, holder, Type.TOPUP);
+                case "refund" -> navigateToInsert(p, holder, Type.REFUND_CONFIRM);
+                case "history" -> navigateToInsert(p, holder, Type.HISTORY);
+            }
+            return;
+        }
         if (index == SLOT_CARD) {
             navigate(p, holder, Type.INSERT, 0);
             return;
         }
         switch (holder.type) {
-            case INSERT -> { /* Handled above. */ }
-            case MAIN -> {
-                switch (index) {
-                    case SLOT_CREATE -> { if (holder.card == null) navigate(p, holder, Type.CREATE, 0); }
-                    case SLOT_BALANCE -> { if (requireCard(p, holder)) checkBalance(p, holder); }
-                    case SLOT_TOPUP -> { if (requireCard(p, holder)) navigate(p, holder, Type.TOPUP, 0); }
-                    case SLOT_REFUND -> { if (requireCard(p, holder)) navigate(p, holder, Type.REFUND_CONFIRM, 0); }
-                    case SLOT_HISTORY -> { if (requireCard(p, holder)) navigate(p, holder, Type.HISTORY, 0); }
-                }
-            }
+            case INSERT, MAIN -> { /* Handled above. */ }
             case CREATE -> { /* Handled above. */ }
             case TOPUP -> { /* Handled by keypad above. */ }
             case REFUND_CONFIRM -> {
@@ -449,13 +603,13 @@ public final class MachineGui implements Listener {
         if (!(e.getView().getTopInventory().getHolder(false) instanceof MachineHolder holder)) return;
         // Dragging one card directly onto the dedicated reader slot is allowed.
         if (holder.type == Type.INSERT && holder.card == null
-                && e.getRawSlots().size() == 1 && e.getRawSlots().contains(SLOT_INSERT)
+                && e.getRawSlots().size() == 1 && e.getRawSlots().contains(insertCardSlot())
                 && e.getWhoClicked() instanceof Player p && validCard(p, e.getOldCursor())) {
             e.setCancelled(true);
             holder.card = e.getOldCursor().clone();
             plugin.debug().log("CARD", "Card drag-inserted: player=%s card=%s",p.getName(),selectedId(holder));
             updateCursorNextTick(p, null);
-            renderInsert(holder);
+            inserted(p, holder);
             return;
         }
         e.setCancelled(true);
@@ -485,14 +639,99 @@ public final class MachineGui implements Listener {
         catch (NumberFormatException ex) { return 0; }
     }
 
+    private int keypadSlot(String action, int fallback) {
+        int slot = cfg().getInt("gui.numpad.slots." + action, fallback);
+        return slot >= 0 && slot < 54 ? slot : fallback;
+    }
+
+    private int translateKeypadSlot(int physical) {
+        for (int digit = 1; digit <= 9; digit++)
+            if (physical == keypadSlot(Integer.toString(digit), KEYPAD_DIGITS[digit - 1])) return KEYPAD_DIGITS[digit - 1];
+        if (physical == keypadSlot("0", SLOT_ZERO)) return SLOT_ZERO;
+        if (physical == keypadSlot("decimal", SLOT_DECIMAL)) return SLOT_DECIMAL;
+        if (physical == keypadSlot("clear", SLOT_CLEAR)) return SLOT_CLEAR;
+        if (physical == keypadSlot("confirm", SLOT_CONFIRM_CREATE)) return SLOT_CONFIRM_CREATE;
+        if (physical == keypadSlot("back", SLOT_CREATE_BACK)) return SLOT_CREATE_BACK;
+        return -1;
+    }
+
+    // Optional custom item models for digits 0-9 and decimal on the 54-slot keypad.
+    // Configure gui.numpad.items.<button>.item-model and optionally .material.
+    // Clear can optionally use a custom item model; Confirm and Back remain empty clickable slots.
+    // Custom buttons have no visible name, lore or tooltip; the artwork supplies labels.
+    private ItemStack keypadButton(String key, ItemStack fallback) {
+        String path = "gui.numpad.items." + key;
+        String model = cfg().getString(path + ".item-model", "");
+        if (model == null || model.isBlank()) return fallback;
+
+        NamespacedKey modelKey = NamespacedKey.fromString(model.trim());
+        if (modelKey == null) {
+            plugin.getLogger().warning("Invalid keypad item model for '" + key + "': " + model);
+            return fallback;
+        }
+        Material material = Material.matchMaterial(cfg().getString(path + ".material", "PAPER"));
+        if (material == null || material.isAir()) material = Material.PAPER;
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return fallback;
+        meta.setItemModel(modelKey);
+        meta.displayName(Component.empty());
+        meta.lore(List.of());
+        meta.setHideTooltip(true);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private void styleKeypad(MachineHolder holder) {
+        Inventory inv = holder.inventory;
+        Map<Integer, ItemStack> items = new HashMap<>();
+        for (int digit = 1; digit <= 9; digit++)
+            items.put(keypadSlot(Integer.toString(digit), KEYPAD_DIGITS[digit - 1]),
+                    keypadButton(Integer.toString(digit), inv.getItem(KEYPAD_DIGITS[digit - 1])));
+        items.put(keypadSlot("0", SLOT_ZERO), keypadButton("0", inv.getItem(SLOT_ZERO)));
+        items.put(keypadSlot("decimal", SLOT_DECIMAL), keypadButton("decimal", inv.getItem(SLOT_DECIMAL)));
+        // Confirm and Back remain invisible hitboxes. Clear is optional and defaults to invisible.
+        String clearModel = cfg().getString("gui.numpad.items.clear.item-model", "");
+        if (clearModel != null && !clearModel.isBlank())
+            items.put(keypadSlot("clear", SLOT_CLEAR), keypadButton("clear", inv.getItem(SLOT_CLEAR)));
+        // Their slot mappings and click actions remain active.
+        for (int i : KEYPAD_DIGITS) inv.setItem(i, null);
+        for (int i : new int[]{SLOT_ZERO, SLOT_DECIMAL, SLOT_CLEAR, SLOT_CONFIRM_CREATE, SLOT_CREATE_BACK}) inv.setItem(i, null);
+        if (cfg().getBoolean("gui.numpad.show-items", true))
+            items.forEach((index, item) -> { if (item != null) inv.setItem(index, item); });
+    }
+
+    // Preserve the live tooltip while using a transparent resource-pack item model.
+    private ItemStack invisibleInfoItem(ItemStack original) {
+        String path = "gui.numpad.info";
+        String model = cfg().getString(path + ".item-model", "");
+        if (model == null || model.isBlank()) return original;
+        NamespacedKey key = NamespacedKey.fromString(model.trim());
+        if (key == null) {
+            plugin.getLogger().warning("Invalid numpad info item model: " + model);
+            return original;
+        }
+        Material material = Material.matchMaterial(cfg().getString(path + ".material", "PAPER"));
+        if (material == null || material.isAir()) material = Material.PAPER;
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        ItemMeta oldMeta = original.getItemMeta();
+        if (meta == null || oldMeta == null) return original;
+        meta.displayName(oldMeta.displayName());
+        meta.lore(oldMeta.lore());
+        meta.setItemModel(key);
+        item.setItemMeta(meta);
+        return item;
+    }
+
     private void renderCreate(MachineHolder holder) {
         Inventory inv = holder.inventory;
         double preload = enteredAmount(holder);
         double total = round(preload + cardDeposit());
-        inv.setItem(13, simple(Material.CLOCK, "<aqua>Initial balance: <white>" + money(preload),
+        inv.setItem(13, invisibleInfoItem(simple(Material.CLOCK, "<aqua>Initial balance: <white>" + money(preload),
                 "<gray>Card deposit: <yellow>" + money(cardDeposit()),
                 "<gray>Total to pay: <green>" + money(total),
-                "<gray>Maximum balance: <white>" + money(maxCreationBalance())));
+                "<gray>Maximum balance: <white>" + money(maxCreationBalance()))));
         for (int digit = 1; digit <= 9; digit++) {
             inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
                     "<white><bold>" + digit));
@@ -506,6 +745,7 @@ public final class MachineGui implements Listener {
                 "<gray>Deposit: <yellow>" + money(cardDeposit()),
                 "<yellow>Click to confirm purchase"));
         inv.setItem(SLOT_CREATE_BACK, button("back"));
+        styleKeypad(holder);
     }
 
     private void handleCreateClick(Player p, MachineHolder holder, int slot) {
@@ -601,10 +841,10 @@ public final class MachineGui implements Listener {
         } catch (SQLException ex) {
             plugin.getLogger().severe("Could not read balance: " + ex);
         }
-        inv.setItem(13, simple(Material.CLOCK, "<aqua>Top-up amount: <white>" + money(amount),
+        inv.setItem(13, invisibleInfoItem(simple(Material.CLOCK, "<aqua>Top-up amount: <white>" + money(amount),
                 "<gray>Current balance: <white>" + money(current),
                 "<gray>Balance after top-up: <green>" + money(round(current + amount)),
-                "<gray>Maximum card balance: <yellow>" + money(cfg().getDouble("max-balance", 1000))));
+                "<gray>Maximum card balance: <yellow>" + money(cfg().getDouble("max-balance", 1000)))));
         for (int digit = 1; digit <= 9; digit++)
             inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
                     "<white><bold>" + digit));
@@ -616,6 +856,7 @@ public final class MachineGui implements Listener {
                 "<gray>Add this amount to the inserted Tap2Go card",
                 "<yellow>Click to confirm payment"));
         inv.setItem(SLOT_CREATE_BACK, button("back"));
+        styleKeypad(holder);
     }
 
     private void handleTopupClick(Player p, MachineHolder holder, int slot) {

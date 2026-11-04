@@ -1,198 +1,255 @@
-# ==========================================
-# SYLVPAY CONFIGURATION
-# ==========================================
-
+# SylvPay configuration — updated GUI flow, Nexo insert and numpad glyphs
 debug:
   enabled: false
-
 currency:
-  symbol: "£"
-  position: "before"
+  symbol: £
+  position: before
   decimals: 2
   thousands-separator: true
   space: false
-
-# ==========================================
-# NEXO TICKET MACHINE FURNITURE
-# ==========================================
-# Right-clicking ANY placed Nexo furniture with this ID opens the GUI.
-# No Nexo clickActions or individual machine registrations are required.
-# Set to "" to disable furniture access.
 ticket-machine:
-  furniture-id: "sylv_ticket_machine"
-
-# ==========================================
-# TICKET MACHINE GUI
-# ==========================================
+  furniture-id: sylv_ticket_machine
 gui:
-  # Sounds heard only by the player using the ticket machine.
   sounds:
     enabled: true
     button:
-      sound: "minecraft:ui.button.click"
+      sound: minecraft:ui.button.click
       volume: 0.6
       pitch: 1.0
     keypad:
-      sound: "minecraft:ui.button.click"
+      sound: minecraft:ui.button.click
       volume: 0.6
       pitch: 1.35
-
-  title: "<dark_gray>SylvPay Ticket Machine"
-  topup-title: "<dark_gray>Top Up Your Card"
-  insert-title: "<dark_gray>Insert Tap2Go Card"
-  create-title: "<dark_gray>Create Tap2Go Card"
+  title: <dark_gray>SylvPay Ticket Machine
+  topup-title: <dark_gray>Top Up Your Card
+  insert-title: <dark_gray>Insert Tap2Go Card
+  create-title: <dark_gray>Create Tap2Go Card
+  main:
+    show-items: false
+    slots:
+      create-card:
+        - 19
+        - 20
+        - 28
+        - 29
+      balance:
+        - 23
+        - 24
+        - 32
+        - 33
+      topup:
+        - 37
+        - 38
+        - 46
+        - 47
+      refund:
+        - 41
+        - 42
+        - 50
+        - 51
   custom:
     enabled: false
-    glyph: "sylvpay_machine"
-    topup-glyph: "sylvpay_topup"
-    shift: "<shift:-8>"
-    prefix: "<!italic><!bold><white>"
-    suffix: ""
-
-# ==========================================
-# TAP2GO CARD
-# ==========================================
+    glyph: tap2gomainscreen
+    title-shift: -9
+    topup-glyph: sylvpay_topup
+    shift: ''
+    prefix: <!italic><!bold><white>
+    suffix: ''
+    insert:
+      enabled: false
+      glyph: tap2goinsertcard
+      title-shift: -9
+    create:
+      enabled: false
+      glyph: tap2gocreatecard
+      title-shift: -9
+    numpad:
+      enabled: false
+      glyph: tap2gonumpad
+      title-shift: -9
+  insert:
+    size: 27
+    card-slot: 13
+    back-slot: 22
+    show-items: true
+  numpad:
+    show-items: true
+    # The info item uses a transparent custom model but retains its live tooltip.
+    info:
+      material: PAPER
+      item-model: "sylvarion:invisible_gui_item"
+    # Digits, decimal and Clear use custom textured items.
+    # Confirm and Back remain empty clickable GUI slots.
+    items:
+      '1':
+        item-model: "sylvarion:keypad_1"
+      '2':
+        item-model: "sylvarion:keypad_2"
+      '3':
+        item-model: "sylvarion:keypad_3"
+      '4':
+        item-model: "sylvarion:keypad_4"
+      '5':
+        item-model: "sylvarion:keypad_5"
+      '6':
+        item-model: "sylvarion:keypad_6"
+      '7':
+        item-model: "sylvarion:keypad_7"
+      '8':
+        item-model: "sylvarion:keypad_8"
+      '9':
+        item-model: "sylvarion:keypad_9"
+      '0':
+        item-model: "sylvarion:keypad_0"
+      decimal:
+        item-model: "sylvarion:keypad_decimal"
+      clear:
+        material: PAPER
+        item-model: "sylvarion:keypad_clear"
+    slots:
+      '1': 19
+      '2': 20
+      '3': 21
+      '4': 28
+      '5': 29
+      '6': 30
+      '7': 37
+      '8': 38
+      '9': 39
+      '0': 47
+      decimal: 46
+      clear: 48
+      confirm: 33
+      back: 53
 card:
   material: PAPER
-  item-model: "sylvpay:tap2go_card"
-  name: "<gold><bold>SylvPay Tap2Go"
+  item-model: sylvpay:tap2go_card
+  name: <gold><bold>SylvPay Tap2Go
   lore:
-    - "<gray>Card ID: <white>{id}"
-    - "<dark_gray>Top up at any ticket machine."
+    - '<gray>Card ID: <white>{id}'
+    - <dark_gray>Top up at any ticket machine.
   price: 2.5
   max-creation-balance: 500.0
-  buy-options: [5, 10, 25, 50]
-
-topup-options: [5, 10, 25, 50]
+  buy-options:
+    - 5
+    - 10
+    - 25
+    - 50
+topup-options:
+  - 5
+  - 10
+  - 25
+  - 50
 max-balance: 1000
-
-# ==========================================
-# TICKET MACHINE BUTTONS
-# ==========================================
 buttons:
   buy:
     material: PAPER
-    item-model: "sylvpay:tap2go_card"
-    name: "<gold>Buy Card <gray>(preload <green>{amount}<gray>)"
+    item-model: sylvpay:tap2go_card
+    name: <gold>Buy Card <gray>(preload <green>{amount}<gray>)
     lore:
-      - "<gray>Card: <white>{price}"
-      - "<gray>Preload: <white>{amount}"
-      - "<gray>Total: <green>{total}"
+      - '<gray>Card: <white>{price}'
+      - '<gray>Preload: <white>{amount}'
+      - '<gray>Total: <green>{total}'
   balance:
     material: CLOCK
-    item-model: ""
-    name: "<aqua>Check Balance"
+    item-model: ''
+    name: <aqua>Check Balance
     lore:
-      - "<gray>Uses the card in your inventory."
+      - <gray>Uses the card in your inventory.
   topup:
     material: EMERALD
-    item-model: ""
-    name: "<green>Top Up Card"
+    item-model: ''
+    name: <green>Top Up Card
     lore:
-      - "<gray>Add money from your balance."
+      - <gray>Add money from your balance.
   refund:
     material: REDSTONE
-    item-model: ""
-    name: "<red>Refund Card"
+    item-model: ''
+    name: <red>Refund Card
     lore:
-      - "<gray>Takes your card and returns"
-      - "<gray>its balance to your account."
+      - <gray>Takes your card and returns
+      - <gray>its balance to your account.
   topup-amount:
     material: GOLD_INGOT
-    item-model: ""
-    name: "<green>Add <white>{amount}"
+    item-model: ''
+    name: <green>Add <white>{amount}
     lore:
-      - "<gray>Click to top up."
+      - <gray>Click to top up.
   back:
     material: ARROW
-    item-model: ""
-    name: "<gray>Back"
+    item-model: ''
+    name: <gray>Back
     lore: []
-
-# ==========================================
-# GENERAL MESSAGES
-# ==========================================
 messages:
-  prefix: "<gold>[SylvPay] </gold>"
-  no-card: "<red>You don't have a SylvPay card in your inventory."
-  not-enough-money: "<red>You can't afford that. You need {amount}."
-  bought: "<green>Bought card <white>{id}</white> with <white>{balance}</white> preloaded."
-  balance: "<gray>Card <white>{id}</white> balance: <green>{balance}"
-  topped-up: "<green>Added <white>{amount}</white>. New balance: <white>{balance}"
-  max-balance: "<red>That would exceed the max card balance of {max}."
-  refunded: "<green>Card <white>{id}</white> refunded. You received <white>{amount}</white>."
-  invalid-card: "<red>That card is no longer valid."
-  error: "<red>Something went wrong. Tell an admin."
-  no-permission: "<red>You don't have permission."
-  players-only: "Only players can use this."
-  reloaded: "<green>Config reloaded."
-
-# ==========================================
-# NEXO FARE GATES
-# ==========================================
+  prefix: <gold>[SylvPay] </gold>
+  no-card: <red>You don't have a SylvPay card in your inventory.
+  not-enough-money: <red>You can't afford that. You need {amount}.
+  bought: <green>Bought card <white>{id}</white> with <white>{balance}</white> preloaded.
+  balance: '<gray>Card <white>{id}</white> balance: <green>{balance}'
+  topped-up: '<green>Added <white>{amount}</white>. New balance: <white>{balance}'
+  max-balance: <red>That would exceed the max card balance of {max}.
+  refunded: <green>Card <white>{id}</white> refunded. You received <white>{amount}</white>.
+  invalid-card: <red>That card is no longer valid.
+  error: <red>Something went wrong. Tell an admin.
+  no-permission: <red>You don't have permission.
+  players-only: Only players can use this.
+  reloaded: <green>Config reloaded.
 faregates:
   enabled: false
   models:
-    closed: "sylv_faregate_closed"
-    open: "sylv_faregate_open"
+    closed: sylv_faregate_closed
+    open: sylv_faregate_open
   tap-cooldown-ms: 1500
   opening:
     timeout-ticks: 100
-    # How far the rider must clear the gate before it closes.
     clearance-radius: 0.85
-    # Maximum sideways distance for detecting the rider crossing.
     lane-half-width: 1.0
-    # Minimum horizontal space checked before closing the barrier.
-    crossing-radius: 1.5 # Legacy setting; current code does not use this.
+    crossing-radius: 1.5
   sounds:
     tap-in:
       enabled: true
-      sound: "minecraft:block.note_block.bell"
+      sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.4
     tap-out:
       enabled: true
-      sound: "minecraft:block.note_block.bell"
+      sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.0
   messages:
-    tap-in: "<green>✔ Tapped into <gold>{station}</gold>"
-    tap-out: "<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}"
-    no-card: "<red>Hold your Tap2Go card to tap."
-    invalid-card: "<red>This card is invalid."
-    already-in: "<red>This card already has an active journey. Tap out first."
-    no-journey: "<red>You must tap in before tapping out."
-    insufficient-balance: "<red>Insufficient card balance. Balance: {balance}"
-    journey-expired: "<red>Journey expired. Contact staff to resolve it."
-    busy: "<yellow>This gate is in use."
-    model-missing: "<red>Open gate Nexo item ID not found."
-    error: "<red>Unable to process the tap. Contact staff."
-
-# ==========================================
-# NEXO STANDALONE VALIDATORS
-# ==========================================
+    tap-in: <green>✔ Tapped into <gold>{station}</gold>
+    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
+    no-card: <red>Hold your Tap2Go card to tap.
+    invalid-card: <red>This card is invalid.
+    already-in: <red>This card already has an active journey. Tap out first.
+    no-journey: <red>You must tap in before tapping out.
+    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
+    journey-expired: <red>Journey expired. Contact staff to resolve it.
+    busy: <yellow>This gate is in use.
+    model-missing: <red>Open gate Nexo item ID not found.
+    error: <red>Unable to process the tap. Contact staff.
 validators:
   enabled: true
-  furniture-id: "sylv_validator"
+  furniture-id: sylv_validator
   tap-cooldown-ms: 1500
   sounds:
     tap-in:
       enabled: true
-      sound: "minecraft:block.note_block.bell"
+      sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.4
     tap-out:
       enabled: true
-      sound: "minecraft:block.note_block.bell"
+      sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.0
   messages:
-    tap-in: "<green>✔ Tapped into <gold>{station}</gold>"
-    tap-out: "<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}"
-    no-card: "<red>Hold your Tap2Go card to tap."
-    invalid-card: "<red>This card is invalid."
-    already-in: "<red>This card already has an active journey."
-    no-journey: "<red>No active journey found."
-    insufficient-balance: "<red>Insufficient card balance. Balance: {balance}"
-    journey-expired: "<red>Journey expired. Contact staff."
-    error: "<red>Unable to process the tap. Contact staff."
+    tap-in: <green>✔ Tapped into <gold>{station}</gold>
+    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
+    no-card: <red>Hold your Tap2Go card to tap.
+    invalid-card: <red>This card is invalid.
+    already-in: <red>This card already has an active journey.
+    no-journey: <red>No active journey found.
+    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
+    journey-expired: <red>Journey expired. Contact staff.
+    error: <red>Unable to process the tap. Contact staff.
