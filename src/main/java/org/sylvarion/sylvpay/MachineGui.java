@@ -37,7 +37,7 @@ import java.util.Locale;
 
 public final class MachineGui implements Listener {
 
-    private enum Type { MAIN, INSERT, CREATE, TOPUP, HISTORY, REFUND_CONFIRM }
+    private enum Type { MAIN, INSERT, CREATE, TOPUP, HISTORY }
 
     private static final class MachineHolder implements InventoryHolder {
         final Type type;
@@ -178,7 +178,7 @@ public final class MachineGui implements Listener {
     }
 
     private void slot(MachineHolder holder) {
-        holder.inventory.setItem(SLOT_CARD, holder.card == null
+        holder.inventory.setItem(guiSlot("gui.history.slots.card-reader", SLOT_CARD), holder.card == null
                 ? simple(Material.GRAY_STAINED_GLASS_PANE, "<yellow>Insert Tap2Go card",
                 "<gray>Click to open the card reader", "<gray>Then drag a card into its slot")
                 : holder.card.clone());
@@ -228,6 +228,7 @@ public final class MachineGui implements Listener {
             case "insert" -> "gui.insert-title";
             case "create" -> "gui.create-title";
             case "topup" -> "gui.topup-title";
+            case "history" -> "gui.history-title";
             default -> "gui.title";
         };
         String normal = cfg().getString(normalKey, "<dark_gray>SylvPay Ticket Machine");
@@ -237,6 +238,7 @@ public final class MachineGui implements Listener {
             case "insert" -> "gui.custom.insert";
             case "create" -> cfg().isConfigurationSection("gui.custom.create") ? "gui.custom.create" : "gui.custom.numpad";
             case "topup" -> "gui.custom.numpad";
+            case "history" -> "gui.custom.history";
             default -> "gui.custom";
         };
         if (!base.equals("gui.custom") && !cfg().getBoolean(base + ".enabled", false)) return text(normal);
@@ -376,8 +378,7 @@ public final class MachineGui implements Listener {
             case INSERT -> guiTitle("insert");
             case CREATE -> guiTitle("create");
             case TOPUP -> guiTitle("topup");
-            case HISTORY -> text("<dark_gray>Tap2Go Transaction History");
-            case REFUND_CONFIRM -> text("<dark_red>Confirm Card Refund");
+            case HISTORY -> guiTitle("history");
         };
         Inventory inv = Bukkit.createInventory(holder, size, title);
         holder.inventory = inv;
@@ -390,10 +391,7 @@ public final class MachineGui implements Listener {
             renderCreate(holder);
         } else if (type == Type.TOPUP) {
             renderTopup(holder);
-        } else if (type == Type.REFUND_CONFIRM) {
-            inv.setItem(11, simple(Material.LIME_CONCRETE, "<green>Confirm refund",
-                    "<gray>Deactivate this card and refund its balance"));
-            inv.setItem(15, simple(Material.RED_CONCRETE, "<red>Cancel"));
+
         } else {
             try {
                 List<CardDatabase.HistoryEntry> entries = plugin.db().history(selectedId(holder), page, 21);
@@ -412,19 +410,54 @@ public final class MachineGui implements Listener {
                         entry = simple(Material.PAPER, "<yellow>" + h.kind() + " " + money(h.amount()),
                                 "<gray>" + date);
                     }
-                    inv.setItem(9 + i + (i / 7) * 2, entry);
+                    inv.setItem(historyEntrySlots().get(i), entry);
                 }
-                if (entries.isEmpty()) inv.setItem(22, simple(Material.BARRIER, "<gray>No transactions on this page"));
-                if (page > 0) inv.setItem(36, simple(Material.ARROW, "<yellow>Previous page"));
-                if (entries.size() == 21) inv.setItem(44, simple(Material.ARROW, "<yellow>Next page"));
+                if (entries.isEmpty()) inv.setItem(guiSlot("gui.history.slots.empty", 22), simple(Material.BARRIER, "<gray>No transactions on this page"));
+                if (page > 0) inv.setItem(guiSlot("gui.history.slots.previous-page", 36), simple(Material.ARROW, "<yellow>Previous page"));
+                if (entries.size() == 21) inv.setItem(guiSlot("gui.history.slots.next-page", 44), simple(Material.ARROW, "<yellow>Next page"));
             } catch (SQLException ex) {
                 plugin.getLogger().severe("History query failed: " + ex.getMessage());
                 msg(p, "error");
             }
-            inv.setItem(40, button("back"));
+            inv.setItem(guiSlot("gui.history.slots.back", 40), button("back"));
         }
         plugin.debug().log("GUI", "Opened %s: player=%s card=%s page=%d",type,p.getName(),selectedId(holder),page);
         p.openInventory(inv);
+    }
+
+    // All GUI slot positions are zero-based (0..53). Screen-specific keypad
+    // overrides fall back to gui.numpad.slots for backwards compatibility.
+    private int guiSlot(String path, int fallback) {
+        int value = cfg().getInt(path, fallback);
+        if (value < 0 || value >= 54) {
+            plugin.getLogger().warning("Invalid SylvPay GUI slot " + value + " at " + path);
+            return fallback;
+        }
+        return value;
+    }
+
+    private int keypadSlot(Type type, String action, int fallback) {
+        int shared = guiSlot("gui.numpad.slots." + action, fallback);
+        String screen = type == Type.CREATE ? "create" : "topup";
+        return guiSlot("gui." + screen + ".slots." + action, shared);
+    }
+
+    private int infoSlot(Type type) {
+        String screen = type == Type.CREATE ? "create" : "topup";
+        return guiSlot("gui." + screen + ".slots.info", 13);
+    }
+
+    private List<Integer> historyEntrySlots() {
+        List<Integer> defaults = new ArrayList<>();
+        for (int i = 0; i < 21; i++) defaults.add(9 + i + (i / 7) * 2);
+        if (!cfg().isList("gui.history.slots.entries")) return defaults;
+        List<Integer> configured = cfg().getIntegerList("gui.history.slots.entries");
+        if (configured.size() != 21 || configured.stream().anyMatch(v -> v < 0 || v >= 54)
+                || new HashSet<>(configured).size() != 21) {
+            plugin.getLogger().warning("gui.history.slots.entries must contain 21 unique slots from 0 to 53");
+            return defaults;
+        }
+        return configured;
     }
 
     private void renderInsert(MachineHolder holder) {
@@ -434,10 +467,10 @@ public final class MachineGui implements Listener {
                 "<gray>Pick up a card from your inventory",
                 "<gray>and place or drag it into this slot")
                 : holder.card.clone());
-        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(11, simple(Material.BOOK, "<aqua>Card reader",
+        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(guiSlot("gui.insert.info-slot", 11), simple(Material.BOOK, "<aqua>Card reader",
                 holder.card == null ? "<gray>No card inserted" : "<green>Card inserted",
                 "<gray>Only the card in the reader can be used"));
-        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(15, simple(Material.LIME_CONCRETE, "<green>Continue",
+        if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(guiSlot("gui.insert.continue-slot", 15), simple(Material.LIME_CONCRETE, "<green>Continue",
                 "<gray>Return to the ticket machine"));
         if (cfg().getBoolean("gui.insert.show-items", true)) inv.setItem(insertBackSlot(), button("back"));
     }
@@ -448,19 +481,21 @@ public final class MachineGui implements Listener {
     }
 
     private int insertCardSlot() {
-        int slot = cfg().getInt("gui.insert.card-slot", SLOT_INSERT);
-        return slot >= 0 && slot < 54 ? slot : SLOT_INSERT;
+        return guiSlot("gui.insert.card-slot", SLOT_INSERT);
     }
 
     private int insertBackSlot() {
-        int slot = cfg().getInt("gui.insert.back-slot", 22);
-        return slot >= 0 && slot < 54 ? slot : 22;
+        return guiSlot("gui.insert.back-slot", 22);
     }
 
     private void inserted(Player p, MachineHolder holder) {
         if (holder.afterInsert == Type.MAIN) {
             checkBalance(p, holder);
             navigate(p, holder, Type.MAIN, 0);
+        } else if (holder.afterInsert == Type.INSERT) {
+            // Refund immediately after a valid card is inserted; no confirmation screen.
+            holder.afterInsert = null;
+            refund(p, holder);
         } else if (holder.afterInsert != null) {
             navigate(p, holder, holder.afterInsert, 0);
         } else {
@@ -499,7 +534,7 @@ public final class MachineGui implements Listener {
                 && holder.type != Type.CREATE && holder.type != Type.TOPUP && holder.type != Type.INSERT) return;
 
         boolean keypad = (holder.type == Type.CREATE || holder.type == Type.TOPUP)
-                && translateKeypadSlot(slot) >= 0;
+                && translateKeypadSlot(holder.type, slot) >= 0;
         String path = keypad ? "gui.sounds.keypad" : "gui.sounds.button";
         String sound = cfg().getString(path + ".sound", "minecraft:ui.button.click");
         if (sound == null || sound.isBlank()) return;
@@ -525,7 +560,7 @@ public final class MachineGui implements Listener {
         }
         if (holder.type == Type.CREATE || holder.type == Type.TOPUP) {
             if (e.getClickedInventory() == e.getView().getTopInventory()) {
-                int logical = translateKeypadSlot(e.getSlot());
+                int logical = translateKeypadSlot(holder.type, e.getSlot());
                 if (logical < 0) return;
                 if (holder.type == Type.CREATE) handleCreateClick(p, holder, logical);
                 else handleTopupClick(p, holder, logical);
@@ -556,7 +591,7 @@ public final class MachineGui implements Listener {
                 } else if (holder.card != null && getCardId(cursor) != null) {
                     p.sendMessage(text("<yellow>Remove the inserted card first."));
                 }
-            } else if (index == insertBackSlot() || (index == 15 && cfg().getBoolean("gui.insert.show-items", true))) {
+            } else if (index == insertBackSlot() || (index == guiSlot("gui.insert.continue-slot", 15) && cfg().getBoolean("gui.insert.show-items", true))) {
                 navigate(p, holder, Type.MAIN, 0);
             }
             return;
@@ -572,12 +607,12 @@ public final class MachineGui implements Listener {
                 case "create-card" -> { if (holder.card == null) navigate(p, holder, Type.CREATE, 0); }
                 case "balance" -> navigateToInsert(p, holder, Type.MAIN);
                 case "topup" -> navigateToInsert(p, holder, Type.TOPUP);
-                case "refund" -> navigateToInsert(p, holder, Type.REFUND_CONFIRM);
+                case "refund" -> navigateToInsert(p, holder, Type.INSERT);
                 case "history" -> navigateToInsert(p, holder, Type.HISTORY);
             }
             return;
         }
-        if (index == SLOT_CARD) {
+        if (index == guiSlot("gui.history.slots.card-reader", SLOT_CARD)) {
             navigate(p, holder, Type.INSERT, 0);
             return;
         }
@@ -585,14 +620,10 @@ public final class MachineGui implements Listener {
             case INSERT, MAIN -> { /* Handled above. */ }
             case CREATE -> { /* Handled above. */ }
             case TOPUP -> { /* Handled by keypad above. */ }
-            case REFUND_CONFIRM -> {
-                if (index == 11 && requireCard(p, holder)) refund(p, holder);
-                else if (index == 15) navigate(p, holder, Type.MAIN, 0);
-            }
             case HISTORY -> {
-                if (index == 40) navigate(p, holder, Type.MAIN, 0);
-                else if (index == 36 && holder.page > 0) navigate(p, holder, Type.HISTORY, holder.page - 1);
-                else if (index == 44 && holder.inventory.getItem(44) != null)
+                if (index == guiSlot("gui.history.slots.back", 40)) navigate(p, holder, Type.MAIN, 0);
+                else if (index == guiSlot("gui.history.slots.previous-page", 36) && holder.page > 0) navigate(p, holder, Type.HISTORY, holder.page - 1);
+                else if (index == guiSlot("gui.history.slots.next-page", 44) && holder.inventory.getItem(index) != null)
                     navigate(p, holder, Type.HISTORY, holder.page + 1);
             }
         }
@@ -639,19 +670,14 @@ public final class MachineGui implements Listener {
         catch (NumberFormatException ex) { return 0; }
     }
 
-    private int keypadSlot(String action, int fallback) {
-        int slot = cfg().getInt("gui.numpad.slots." + action, fallback);
-        return slot >= 0 && slot < 54 ? slot : fallback;
-    }
-
-    private int translateKeypadSlot(int physical) {
+    private int translateKeypadSlot(Type type, int physical) {
         for (int digit = 1; digit <= 9; digit++)
-            if (physical == keypadSlot(Integer.toString(digit), KEYPAD_DIGITS[digit - 1])) return KEYPAD_DIGITS[digit - 1];
-        if (physical == keypadSlot("0", SLOT_ZERO)) return SLOT_ZERO;
-        if (physical == keypadSlot("decimal", SLOT_DECIMAL)) return SLOT_DECIMAL;
-        if (physical == keypadSlot("clear", SLOT_CLEAR)) return SLOT_CLEAR;
-        if (physical == keypadSlot("confirm", SLOT_CONFIRM_CREATE)) return SLOT_CONFIRM_CREATE;
-        if (physical == keypadSlot("back", SLOT_CREATE_BACK)) return SLOT_CREATE_BACK;
+            if (physical == keypadSlot(type, Integer.toString(digit), KEYPAD_DIGITS[digit - 1])) return KEYPAD_DIGITS[digit - 1];
+        if (physical == keypadSlot(type, "0", SLOT_ZERO)) return SLOT_ZERO;
+        if (physical == keypadSlot(type, "decimal", SLOT_DECIMAL)) return SLOT_DECIMAL;
+        if (physical == keypadSlot(type, "clear", SLOT_CLEAR)) return SLOT_CLEAR;
+        if (physical == keypadSlot(type, "confirm", SLOT_CONFIRM_CREATE)) return SLOT_CONFIRM_CREATE;
+        if (physical == keypadSlot(type, "back", SLOT_CREATE_BACK)) return SLOT_CREATE_BACK;
         return -1;
     }
 
@@ -685,18 +711,27 @@ public final class MachineGui implements Listener {
     private void styleKeypad(MachineHolder holder) {
         Inventory inv = holder.inventory;
         Map<Integer, ItemStack> items = new HashMap<>();
-        for (int digit = 1; digit <= 9; digit++)
-            items.put(keypadSlot(Integer.toString(digit), KEYPAD_DIGITS[digit - 1]),
-                    keypadButton(Integer.toString(digit), inv.getItem(KEYPAD_DIGITS[digit - 1])));
-        items.put(keypadSlot("0", SLOT_ZERO), keypadButton("0", inv.getItem(SLOT_ZERO)));
-        items.put(keypadSlot("decimal", SLOT_DECIMAL), keypadButton("decimal", inv.getItem(SLOT_DECIMAL)));
-        // Confirm and Back remain invisible hitboxes. Clear is optional and defaults to invisible.
-        String clearModel = cfg().getString("gui.numpad.items.clear.item-model", "");
-        if (clearModel != null && !clearModel.isBlank())
-            items.put(keypadSlot("clear", SLOT_CLEAR), keypadButton("clear", inv.getItem(SLOT_CLEAR)));
-        // Their slot mappings and click actions remain active.
-        for (int i : KEYPAD_DIGITS) inv.setItem(i, null);
-        for (int i : new int[]{SLOT_ZERO, SLOT_DECIMAL, SLOT_CLEAR, SLOT_CONFIRM_CREATE, SLOT_CREATE_BACK}) inv.setItem(i, null);
+        for (int digit = 1; digit <= 9; digit++) {
+            int logical = KEYPAD_DIGITS[digit - 1];
+            int physical = keypadSlot(holder.type, Integer.toString(digit), logical);
+            items.put(physical, keypadButton(Integer.toString(digit),
+                    simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>" + digit)));
+        }
+        items.put(keypadSlot(holder.type, "0", SLOT_ZERO), keypadButton("0",
+                simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>0")));
+        items.put(keypadSlot(holder.type, "decimal", SLOT_DECIMAL), keypadButton("decimal",
+                simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)")));
+        items.put(keypadSlot(holder.type, "clear", SLOT_CLEAR), keypadButton("clear",
+                simple(Material.REDSTONE, "<red>Clear amount")));
+        // Confirm and Back are real movable buttons, or invisible when show-items is false.
+        ItemStack confirm = holder.type == Type.CREATE
+                ? simple(Material.LIME_CONCRETE, "<green>Buy Tap2Go Card — " + money(round(enteredAmount(holder) + cardDeposit())),
+                "<yellow>Click to confirm purchase")
+                : simple(Material.LIME_CONCRETE, "<green>Confirm Top Up — " + money(enteredAmount(holder)),
+                "<yellow>Click to confirm payment");
+        items.put(keypadSlot(holder.type, "confirm", SLOT_CONFIRM_CREATE), confirm);
+        items.put(keypadSlot(holder.type, "back", SLOT_CREATE_BACK), button("back"));
+        inv.clear();
         if (cfg().getBoolean("gui.numpad.show-items", true))
             items.forEach((index, item) -> { if (item != null) inv.setItem(index, item); });
     }
@@ -728,24 +763,13 @@ public final class MachineGui implements Listener {
         Inventory inv = holder.inventory;
         double preload = enteredAmount(holder);
         double total = round(preload + cardDeposit());
-        inv.setItem(13, invisibleInfoItem(simple(Material.CLOCK, "<aqua>Initial balance: <white>" + money(preload),
-                "<gray>Card deposit: <yellow>" + money(cardDeposit()),
-                "<gray>Total to pay: <green>" + money(total),
-                "<gray>Maximum balance: <white>" + money(maxCreationBalance()))));
-        for (int digit = 1; digit <= 9; digit++) {
-            inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
-                    "<white><bold>" + digit));
-        }
-        inv.setItem(SLOT_ZERO, simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>0"));
-        inv.setItem(SLOT_DECIMAL, simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)"));
-        inv.setItem(SLOT_CLEAR, simple(Material.REDSTONE, "<red>Clear amount"));
-        inv.setItem(SLOT_CONFIRM_CREATE, simple(Material.LIME_CONCRETE,
-                "<green>Buy Tap2Go Card — " + money(total),
-                "<gray>Initial balance: <white>" + money(preload),
-                "<gray>Deposit: <yellow>" + money(cardDeposit()),
-                "<yellow>Click to confirm purchase"));
-        inv.setItem(SLOT_CREATE_BACK, button("back"));
         styleKeypad(holder);
+        if (cfg().getBoolean("gui.numpad.show-items", true))
+            inv.setItem(infoSlot(Type.CREATE), invisibleInfoItem(simple(Material.CLOCK,
+                    "<aqua>Initial balance: <white>" + money(preload),
+                    "<gray>Card deposit: <yellow>" + money(cardDeposit()),
+                    "<gray>Total to pay: <green>" + money(total),
+                    "<gray>Maximum balance: <white>" + money(maxCreationBalance()))));
     }
 
     private void handleCreateClick(Player p, MachineHolder holder, int slot) {
@@ -841,22 +865,13 @@ public final class MachineGui implements Listener {
         } catch (SQLException ex) {
             plugin.getLogger().severe("Could not read balance: " + ex);
         }
-        inv.setItem(13, invisibleInfoItem(simple(Material.CLOCK, "<aqua>Top-up amount: <white>" + money(amount),
-                "<gray>Current balance: <white>" + money(current),
-                "<gray>Balance after top-up: <green>" + money(round(current + amount)),
-                "<gray>Maximum card balance: <yellow>" + money(cfg().getDouble("max-balance", 1000)))));
-        for (int digit = 1; digit <= 9; digit++)
-            inv.setItem(KEYPAD_DIGITS[digit - 1], simple(Material.LIGHT_GRAY_CONCRETE,
-                    "<white><bold>" + digit));
-        inv.setItem(SLOT_ZERO, simple(Material.LIGHT_GRAY_CONCRETE, "<white><bold>0"));
-        inv.setItem(SLOT_DECIMAL, simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)"));
-        inv.setItem(SLOT_CLEAR, simple(Material.REDSTONE, "<red>Clear amount"));
-        inv.setItem(SLOT_CONFIRM_CREATE, simple(Material.LIME_CONCRETE,
-                "<green>Confirm Top Up — " + money(amount),
-                "<gray>Add this amount to the inserted Tap2Go card",
-                "<yellow>Click to confirm payment"));
-        inv.setItem(SLOT_CREATE_BACK, button("back"));
         styleKeypad(holder);
+        if (cfg().getBoolean("gui.numpad.show-items", true))
+            inv.setItem(infoSlot(Type.TOPUP), invisibleInfoItem(simple(Material.CLOCK,
+                    "<aqua>Top-up amount: <white>" + money(amount),
+                    "<gray>Current balance: <white>" + money(current),
+                    "<gray>Balance after top-up: <green>" + money(round(current + amount)),
+                    "<gray>Maximum card balance: <yellow>" + money(cfg().getDouble("max-balance", 1000)))));
     }
 
     private void handleTopupClick(Player p, MachineHolder holder, int slot) {

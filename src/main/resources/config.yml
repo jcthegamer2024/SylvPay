@@ -1,4 +1,4 @@
-# SylvPay configuration — updated GUI flow, Nexo insert and numpad glyphs
+# SylvPay configuration — configurable GUI button slots (0-53)
 debug:
   enabled: false
 currency:
@@ -21,6 +21,7 @@ gui:
       volume: 0.6
       pitch: 1.35
   title: <dark_gray>SylvPay Ticket Machine
+  history-title: <dark_gray>Tap2Go Transaction History
   topup-title: <dark_gray>Top Up Your Card
   insert-title: <dark_gray>Insert Tap2Go Card
   create-title: <dark_gray>Create Tap2Go Card
@@ -47,6 +48,9 @@ gui:
         - 42
         - 50
         - 51
+      history:
+        - 35
+      card-reader: []
   custom:
     enabled: false
     glyph: tap2gomainscreen
@@ -63,6 +67,10 @@ gui:
       enabled: false
       glyph: tap2gocreatecard
       title-shift: -9
+    history:
+      enabled: false
+      glyph: tap2gohistory
+      title-shift: -9
     numpad:
       enabled: false
       glyph: tap2gonumpad
@@ -72,40 +80,78 @@ gui:
     card-slot: 13
     back-slot: 22
     show-items: true
+    info-slot: 11
+    continue-slot: 15
+  create:
+    slots:
+      info: 13
+      confirm: 33
+      back: 53
+  topup:
+    slots:
+      info: 13
+      confirm: 33
+      back: 53
+  history:
+    slots:
+      card-reader: 4
+      previous-page: 36
+      next-page: 44
+      back: 40
+      empty: 22
+      entries:
+        - 9
+        - 10
+        - 11
+        - 12
+        - 13
+        - 14
+        - 15
+        - 18
+        - 19
+        - 20
+        - 21
+        - 22
+        - 23
+        - 24
+        - 27
+        - 28
+        - 29
+        - 30
+        - 31
+        - 32
+        - 33
   numpad:
     show-items: true
-    # The info item uses a transparent custom model but retains its live tooltip.
     info:
       material: PAPER
-      item-model: "sylvarion:invisible_gui_item"
-    # Digits, decimal and Clear use custom textured items.
-    # Confirm and Back remain empty clickable GUI slots.
+      item-model: sylvpay:invisible_gui_item
     items:
       '1':
-        item-model: "sylvarion:keypad_1"
+        item-model: sylvpay:keypad_1
       '2':
-        item-model: "sylvarion:keypad_2"
+        item-model: sylvpay:keypad_2
       '3':
-        item-model: "sylvarion:keypad_3"
+        item-model: sylvpay:keypad_3
       '4':
-        item-model: "sylvarion:keypad_4"
+        item-model: sylvpay:keypad_4
       '5':
-        item-model: "sylvarion:keypad_5"
+        item-model: sylvpay:keypad_5
       '6':
-        item-model: "sylvarion:keypad_6"
+        item-model: sylvpay:keypad_6
       '7':
-        item-model: "sylvarion:keypad_7"
+        item-model: sylvpay:keypad_7
       '8':
-        item-model: "sylvarion:keypad_8"
+        item-model: sylvpay:keypad_8
       '9':
-        item-model: "sylvarion:keypad_9"
+        item-model: sylvpay:keypad_9
       '0':
-        item-model: "sylvarion:keypad_0"
+        item-model: sylvpay:keypad_0
       decimal:
-        item-model: "sylvarion:keypad_decimal"
+        item-model: sylvpay:keypad_decimal
       clear:
         material: PAPER
-        item-model: "sylvarion:keypad_clear"
+        item-model: sylvpay:keypad_clear
     slots:
       '1': 19
       '2': 20
