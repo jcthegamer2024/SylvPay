@@ -1,246 +1,350 @@
-# SylvPay 🚇
+﻿# SylvPay
 
-**Tap2Go transport payment and fare-gate system for Sylvarion City**, built as a Java plugin for a **Paper Minecraft 26.3** server.
+**Tap2Go transport cards, ticket machines, fare gates, and validators for Sylvarion City.**
 
-SylvPay combines reloadable station and fare configuration, persistent Tap2Go smart cards, an inventory-based ticket machine, and Nexo furniture fare gates. 
+SylvPay is a Paper Minecraft plugin that connects a persistent transport-card balance to a Vault economy. Players buy and recharge cards at ticket machines, tap into stations, and pay a journey fare when tapping out.
+
+Current version: **0.3.0-beta**.
 
 ## Features
 
-### Tap2Go smart cards
-
-- Buy a uniquely identified Tap2Go card at a ticket machine, with a configurable card purchase price and starting balance.
-- Card identity is stored in the item's persistent data; balances and card status are kept in SQLite, not in the item's lore.
-- Top up using configurable preset amounts, subject to a maximum card balance.
-- Check the balance of the **specific card inserted into the machine**.
-- Refund the remaining balance through a confirmation screen; the card is deactivated after refund.
-- Cards with an active journey cannot be refunded.
-- Card appearance, item model, name, lore, currency display, and machine buttons are configurable.
-
-### Ticket machine GUI
-
-Open a ticket machine using `/sylvpay machine`.
-
-- Buy-card buttons offer configurable preload options.
-- Insert a Tap2Go card by clicking it in your player inventory while the machine is open, or by placing it into the machine's card slot.
-- The selected card is used for balance checks, top-ups, refunds, and transaction history; the plugin does not silently pick another card from your inventory.
-- The card is returned when you remove it or close the interface; if inventory space is unavailable, the code attempts to drop it back to the player.
-- Transaction history displays completed journeys and card transactions, with pagination.
-- Refunds require confirmation.
-
-**Current GUI implementation note:** The history title, refund title, history button, card-slot placeholder, and confirmation buttons are currently constructed in Java. Some similarly named settings in `config.yml` are placeholders for future customisation, not active overrides.
-
-### Nexo fare gates
-
-- Register a closed Nexo furniture model as an **entrance** or **exit** gate for a station.
-- Right-click a registered closed gate while holding a valid Tap2Go card in your **main hand**.
-- Entrance gates start a journey; exit gates calculate and charge its fare.
-- Gates temporarily swap from the configured closed Nexo furniture model to the open model and back.
-- The gate closing logic takes passenger clearance into account and has a configurable timeout.
-- Configurable tap cooldowns, sound effects, and MiniMessage messages.
-- Tap messages can include station names and numbered fare zones.
-- Gate registrations are persisted in `gates.yml` with **stable numerical IDs**.
-- Normal open/closed furniture swaps preserve the registration and numerical ID.
-- If registered furniture is broken and replaced **at the same saved location**, the recovery logic can reconnect the new furniture UUID to the existing registration when it is clicked, preserving its gate ID, station and direction. Recovery requires a stale previous entity and an unambiguous same-world location match (within approximately 0.1 block); moved gates should be manually reassigned.
-
-### Journeys and fares
-
-- Each card can have one active journey at a time.
-- Tap-in checks the configured minimum entry balance.
-- Tap-out charges the applicable fare and records the completed journey.
-- Journey duration is limited by the configured maximum journey time; expired journeys require staff intervention.
-- Fare selection supports:
-  1. A configured same-station fare.
-  2. A station-to-station route override.
-  3. An optional reverse-route lookup.
-  4. Optional numbered-zone fares, based on the number of zones covered.
-  5. A default fallback fare.
-- Missing station zone information falls back to the configured default fare when zone pricing is enabled.
-
-### Persistent data
-
-SylvPay uses SQLite for card balances, active journeys, completed journey history, and card transactions. Station definitions, fare rules, and gate registrations are stored in YAML files.
+- Physical Tap2Go cards with unique IDs, persistent item metadata, and configurable resource-pack models.
+- Card purchases and top-ups using a decimal number keypad, with up to two decimal places.
+- Balance checks, remaining-balance refunds, and paginated transaction history for the inserted card.
+- Nexo furniture ticket machines, directional entrance/exit gates, and stationary validators.
+- Persistent journeys shared between gates and validators: enter through either system and exit through the other.
+- Station-to-station fares, reverse-route fallback, numbered-zone fares, and same-station pricing.
+- Configurable GUI slots, Nexo glyph titles, item models, sounds, currency formatting, and texture-only buttons.
+- MiniMessage messages and display branding in `lang.yml`.
+- SQLite storage for cards, balances, journeys, and transaction history.
 
 ## Requirements
 
-- A compatible **Paper** server (developed for Minecraft **26.3**).
-- **Java** version required by your Paper version and Gradle project.
-- **Nexo** for the furniture-based fare gates.
-- **Vault** and a Vault-compatible economy provider for purchases, top-ups, and refunds.
-- The dependencies declared in your Gradle build, including Paper API and Nexo API, must resolve correctly.
+| Component | Project configuration |
+| --- | --- |
+| Server | Paper for Minecraft 26.3 |
+| Java | Java 25 toolchain |
+| Nexo | Required; compiled against Nexo 1.29.1 |
+| Vault | Required; compiled against VaultAPI 1.7 |
+| Economy provider | A registered Vault economy provider, such as CMI's economy |
+| CMI | Optional; another Vault-compatible economy provider can be used |
 
-> The main plugin class disables SylvPay if no Vault economy provider is registered. If Nexo is unavailable, the plugin logs a warning and its fare-gate integration is unavailable.
+The build uses Paper API `26.3.build.+`; `paper-plugin.yml` declares API version `26.1`. Adventure/MiniMessage is supplied through Paper. SQLite JDBC is loaded at runtime; the build does not bundle a separate JDBC driver. SylvPay disables itself if it cannot initialise SQLite or find a Vault economy provider.
 
-## Installation
+## Installation and development server
 
-1. Build the plugin with your project's Gradle wrapper:
-
-   ```powershell
-   .\gradlew.bat clean build
-   ```
-
-2. Copy the resulting plugin JAR from `build/libs/` into the Paper server's `plugins/` directory.
-3. Install and configure Nexo, Vault, and a compatible economy provider.
-4. Start the server to create the SylvPay data directory and default configuration files.
-5. Configure `config.yml`, `stations.yml`, and `fares.yml` for your network.
-6. Make sure the closed and open Nexo furniture item IDs match those configured in `config.yml`.
-7. Restart the server, then register gates using the commands below.
-
-**Back up** `gates.yml` and the SQLite database before upgrading or replacing plugin builds.
-
-## Commands
-
-| Command | Permission | Description |
-| --- | --- | --- |
-| `/sylvpay` | — | Displays the command summary. |
-| `/sylvpay machine` | `sylvpay.use` | Opens the Tap2Go ticket machine GUI. |
-| `/sylvpay reload` | `sylvpay.admin` | Reloads plugin configuration, stations and fares. |
-| `/sylvpay stations` | `sylvpay.admin` | Lists stations that currently have registered gates. |
-| `/sylvpay gates <station>` | `sylvpay.admin` | Lists numbered gates at a particular station. |
-| `/sylvpay gate set <station> entrance` | `sylvpay.admin` | Registers the targeted closed Nexo furniture as an entrance. |
-| `/sylvpay gate set <station> exit` | `sylvpay.admin` | Registers the targeted closed Nexo furniture as an exit. |
-| `/sylvpay gate remove` | `sylvpay.admin` | Removes the assignment of the targeted closed gate. |
-| `/sylvpay gate delete <id>` | `sylvpay.admin` | Removes a gate registration by its numerical ID, leaving the furniture in place. |
-
-Gate targeting commands require a player to look at a Nexo furniture item within approximately **6 blocks**. Registration and targeted removal require the configured **closed** furniture model.
-
-### Permissions
-
-| Node | Default | Purpose |
-| --- | --- | --- |
-| `sylvpay.use` | Everyone | Access the ticket machine command. |
-| `sylvpay.admin` | Operators | Manage and inspect stations/gates and reload configuration. |
-
-## Quick-start example
-
-1. Define a station in `stations.yml`:
-
-   ```yaml
-   stations:
-     sylvcentral:
-       name: "Sylvarion Central"
-       zone: 1
-     airport:
-       name: "Sylvarion Airport"
-       zone: 3
-   ```
-
-2. Set up `fares.yml` with your preferred defaults, route overrides and/or zone fares. For example:
-
-   ```yaml
-   fares:
-     default-fare: 3.0
-     same-station-fare: 0.0
-     reverse-routes: true
-     zone-based: true
-     minimum-entry-balance: 1.0
-     maximum-journey-minutes: 180
-     zone-fares:
-       1: 1.50
-       2: 2.50
-       3: 3.50
-     routes:
-       sylvcentral:
-         airport: 4.00
-   ```
-
-   In this example, the explicit Central-to-Airport fare of **£4.00** takes priority over the zone-based calculation. Currency symbol and formatting are controlled separately in `config.yml`.
-
-3. Set the Nexo furniture IDs in `config.yml`:
-
-   ```yaml
-   faregates:
-     enabled: true
-     models:
-       closed: "sylv_faregate_closed"
-       open: "sylv_faregate_open"
-     tap-cooldown-ms: 1500
-     opening:
-       timeout-ticks: 400
-       clearance-radius: 0.85
-       lane-half-width: 1.0
-   ```
-
-   This is an **excerpt**, not a replacement for your full `faregates` section; keep your sounds and message configuration too.
-
-4. Look at the closed furniture at the entrance and run:
+1. Build using an installed Gradle distribution or the IDE's Gradle integration:
 
    ```text
-   /sylvpay gate set sylvcentral entrance
+   gradle build
    ```
 
-5. Look at the closed furniture at the destination exit and run:
+   This checkout does not include Gradle wrapper launch scripts.
 
-   ```text
-   /sylvpay gate set airport exit
-   ```
+2. For a normal server, copy `build/libs/SylvPay-0.3.0-beta.jar` into `plugins/`, alongside Nexo, Vault, and an economy provider. Remove older SylvPay JARs before starting.
+3. Start the server to generate `plugins/SylvPay/` and its configuration files.
+4. Configure your furniture IDs, resource pack, station definitions, fares, and GUI.
+5. Run `/sylvpay reload` after configuration edits. Restart after installing changed plugin code.
 
-6. Use `/sylvpay machine` to purchase a card, then hold it in your main hand and right-click the entrance gate. Travel to the destination and tap the exit gate to complete and pay for the journey.
+For local development, use the IDE's Gradle `runServer` task or:
+
+```text
+gradle runServer
+```
+
+The task uses the `run/` directory and supplies the built plugin directly from `build/libs/`. **Do not also put a SylvPay JAR in `run/plugins/`**, as this creates duplicate plugin entries. Keep the `run/plugins/SylvPay/` data folder.
+
+Stop the test server before rebuilding if Windows locks the plugin JAR. The `run/` and `build/` directories are excluded from Git.
+
+## Using a ticket machine
+
+Players right-click furniture matching `ticket-machine.furniture-id` to open the machine. Machines need no individual registration. Administrators can also open it with `/sylvpay machine`.
+
+- **Buy Card:** enter a starting balance and confirm. Vault charges the starting balance plus `card.price`.
+- **Balance:** insert a card; its balance is displayed in chat.
+- **Top Up:** insert a card, enter an amount, and confirm payment from your Vault account.
+- **Refund:** insert a card to refund its remaining balance immediately. There is no separate confirmation screen. The purchase price is not refunded, and the card is permanently deactivated.
+- **Transaction History:** insert a card to view issuance, top-ups, refunds, and completed journeys, with 21 entries per page.
+
+To insert a card, pick it up from your inventory and place or drag it into the reader slot. Shift-click and hotbar transfers are blocked. The machine uses that specific card and returns it when the interface closes; inventory overflow is dropped at the player's location.
+
+Cards with active journeys cannot be refunded. The original buyer UUID is recorded, but use is based on possession of a valid card, rather than an enforced ownership restriction.
+
+## Commands and permissions
+
+| Command | Purpose |
+| --- | --- |
+| `/sylvpay` | Show command help. |
+| `/sylvpay machine` | Open the ticket machine as a player. |
+| `/sylvpay reload` | Reload config, language, stations, fares, and saved gate/validator assignments. |
+| `/sylvpay stations` | List stations with registered gates. |
+| `/sylvpay gates <station>` | List gate numbers, directions, and locations at a station. |
+| `/sylvpay gate set <station> entrance` | Assign the targeted closed gate as an entrance. |
+| `/sylvpay gate set <station> exit` | Assign the targeted closed gate as an exit. |
+| `/sylvpay gate remove` | Unregister the targeted closed gate. |
+| `/sylvpay gate delete <id>` | Unregister a numbered gate, leaving its furniture in place. |
+| `/sylvpay validator set <station>` | Assign the targeted validator to a station. |
+| `/sylvpay validator remove` | Unregister the targeted validator. |
+| `/sylvpay validator list` | List numbered validators and their locations. |
+| `/sylvpay validator delete <id>` | Unregister a numbered validator, leaving furniture in place. |
+| `/sylvpay debug` | Toggle diagnostic logging. |
+| `/sylvpay debug on` / `off` / `status` | Control or inspect diagnostic logging. |
+
+All commands above except base help require `sylvpay.admin`, which defaults to operators. The entire `gate` command branch is player-only. Targeting commands require looking at the configured Nexo furniture within six blocks.
+
+`sylvpay.use` defaults to everyone and controls opening machines, including furniture interaction. The machine command additionally requires `sylvpay.admin`. Gate and validator tapping do not check these permission nodes.
 
 ## Configuration files
 
-| File | Purpose |
+| File in `plugins/SylvPay/` | Purpose |
 | --- | --- |
-| `config.yml` | Currency, card appearance and pricing, ticket-machine GUI/buttons, messages, Nexo models, sounds, gate timing and clearance. |
-| `stations.yml` | Station IDs, display names and optional numbered zones. |
-| `fares.yml` | Default fares, route overrides, reverse-route behaviour, zone fares, minimum entry balance and journey duration. |
-| `gates.yml` | Persisted gate UUIDs, stable numerical IDs, station/direction assignments and physical locations. |
-| SQLite database (plugin data folder) | Card records, balances, active journeys and transaction history. |
+| `config.yml` | Card settings, currency, GUI layout/models/titles, furniture IDs, sounds, cooldowns, and gate opening behaviour. |
+| `lang.yml` | Display branding and general, gate, and validator messages. |
+| `stations.yml` | Station IDs, display names, and optional positive integer zones. |
+| `fares.yml` | Fare rules, minimum entry balance, and maximum journey duration. |
+| `gates.yml` | Generated when assignments are saved; gate IDs, entity UUIDs, locations, stations, and directions. |
+| `validators.yml` | Generated when assignments are saved; validator IDs, entity UUIDs, locations, and stations. |
+| `cards.db` | SQLite database containing card and journey state. |
 
-`gates.yml` and the SQLite database contain operational state. Do not commit live copies to a public GitHub repository.
+The bundled [config.yml](src/main/resources/config.yml), [lang.yml](src/main/resources/lang.yml), [stations.yml](src/main/resources/stations.yml), and [fares.yml](src/main/resources/fares.yml) provide the complete default configuration. The bundled `paper-plugin.yml` is plugin metadata, not an administrator configuration file.
 
-## Gate replacement and recovery
+Examples below are excerpts. Merge them into the existing sections rather than creating duplicate YAML keys.
 
-If you break a registered Nexo gate and place an identical closed model back in the **exact same location**, the new furniture will have a different entity UUID. SylvPay's recovery logic checks the saved gate position on interaction and attempts to transfer the original registration to the new entity.
+### Card pricing, appearance, and currency
 
-- The **gate number** should stay the same.
-- The **station** and **entrance/exit direction** should stay the same.
-- A gate moved to a different location is **not** automatically reassigned.
-- If recovery cannot safely identify the original registration, remove the stale gate by number with `/sylvpay gate delete <id>` and register the replacement normally.
-
-To check registrations:
-
-```text
-/sylvpay stations
-/sylvpay gates sylvcentral
+```yaml
+currency:
+  symbol: '£'
+  position: before
+  decimals: 2
+  thousands-separator: true
+  space: false
+card:
+  material: PAPER
+  item-model: sylvpay:tap2go_card
+  name: '<gold><bold>SylvPay Tap2Go'
+  lore:
+    - '<gray>Card ID: <white>{id}'
+    - '<dark_gray>Top up at any ticket machine.'
+  price: 2.5
+  max-creation-balance: 500.0
+max-balance: 1000
 ```
 
-## Troubleshooting
+`card.price` is the non-refundable purchase charge. `card.max-creation-balance` sets the maximum preload, with a code ceiling of 500. `max-balance` limits top-ups; a non-positive value disables that balance cap. Amount entry and stored balance updates use two decimal places. Currency formatting changes display, not the economy's currency or exchange rate.
 
-**A gate does nothing when tapped**
+Item models use namespaced resource-pack keys. They must exist in the resource pack sent to players.
 
-- Confirm Nexo is enabled and the furniture is the configured **closed** model.
-- Hold a valid, active Tap2Go card in your main hand.
-- Confirm the gate is registered with `/sylvpay gates <station>`.
-- If the furniture was replaced, check that it is at the exact original position and that the server is running the build containing gate recovery.
-- Check the server console for Nexo or SylvPay warnings.
+### GUI layout and texture-only buttons
 
-**The gate registers but does not open**
+Every menu uses 54 slots, numbered **0–53**, left to right and top to bottom.
 
-- Check that both configured Nexo furniture IDs exist.
-- Check that the card has sufficient balance and that the requested tap matches the gate direction.
-- Verify the plugin has access to the SQLite database.
+```yaml
+gui:
+  create:
+    show-confirm-item: false
+    show-back-item: false
+    slots:
+      info: 13
+      confirm: 33
+      back: 53
+  topup:
+    show-confirm-item: false
+    show-back-item: false
+    slots:
+      info: 13
+      confirm: 33
+      back: 53
+  history:
+    show-back-item: false
+    slots:
+      back: 49
+```
 
-**A card cannot be refunded**
+Setting a visibility option to `false` leaves its configured slot clickable without an inventory item, allowing the GUI texture to draw the button. Set it to `true` to show the item again.
 
-- Finish any active journey first; refunding a card with an active journey is intentionally blocked.
+Other layout controls:
 
-**A journey is expired**
+- `gui.main.slots.<action>` accepts lists of clickable slots for `create-card`, `balance`, `topup`, `refund`, `history`, and `card-reader`. One action can cover multiple slots. History takes precedence if main-menu actions overlap.
+- `gui.main.show-items` controls main-menu button items independently of clickable areas.
+- `gui.insert.card-slot`, `back-slot`, `info-slot`, and `continue-slot` position the reader controls. `gui.insert.show-items` hides its decorative controls; Back remains clickable, but Continue is only active when items are shown.
+- `gui.numpad.slots` positions digits `0`–`9`, `decimal`, `clear`, `confirm`, and `back`. Entries under `gui.create.slots` or `gui.topup.slots` override the shared slots for that screen. The default screen-specific Confirm/Back settings therefore take priority over shared keypad settings.
+- `gui.numpad.show-items` controls all keypad items, including information items. Leave it `true` when hiding only Confirm and Back.
+- `gui.numpad.items.<key>.item-model` and optional `.material` customise digits, decimal, and Clear. Custom keypad buttons hide tooltips.
+- `gui.numpad.info.item-model` can provide a transparent information item that retains its live tooltip.
+- `gui.history.slots` positions the reader, pagination, Back, empty-history indicator, and entries. `entries` must contain exactly 21 unique valid slots. Keep controls outside entry slots and avoid overlaps.
+- `buttons.balance`, `buttons.topup`, `buttons.refund`, and `buttons.back` define visible button material, model, name, and lore. An optional `buttons.create-card` section uses the same format for the main-menu purchase button. Keypad Confirm labels are generated in code.
+- `gui.sounds` controls local button/keypad click feedback.
 
-- The plugin blocks tap-out when the configured maximum journey duration has elapsed. Administrative handling is currently required; no player-facing journey reset command is defined in the inspected command implementation.
+Default main-menu and Confirm/Back items are hidden, while custom glyph titles are disabled. Configure your textures, or enable visible items to make controls apparent without a custom GUI pack.
 
-**Changes to stations or fares are not showing**
+### Nexo GUI backgrounds
 
-- Run `/sylvpay reload`, or fully restart after plugin/code changes. Reloading configuration does **not** replace the running plugin JAR.
+```yaml
+gui:
+  custom:
+    enabled: true
+    glyph: tap2gomainscreen
+    title-shift: -9
+    prefix: '<!italic><!bold><white>'
+    suffix: ''
+    insert:
+      enabled: true
+      glyph: tap2goinsertcard
+      title-shift: -9
+    create:
+      enabled: true
+      glyph: tap2gokeypad
+      title-shift: -9
+    numpad:
+      enabled: true
+      glyph: tap2gokeypad
+      title-shift: -9
+    history:
+      enabled: true
+      glyph: tap2gohistory
+      title-shift: -9
+```
 
-## Development notes
+`gui.custom` controls the main screen and globally enables custom titles. `create` controls Buy Card; `numpad` controls Top Up. Other screens also require their own `enabled: true`.
 
-- Java package: `org.sylvarion.sylvpay`
-- Main class: `SylvPayMain`
-- Relevant components: `MachineGui`, `CardDatabase`, `StationManager`, `FareManager`, `FareGateManager`, `NexoGateBridge`.
-- Nexo furniture is managed through its Java API; the bridge defers gate tapping to the next server tick after a furniture interaction.
-- Currency display is configurable; stored amounts and fare calculations use numeric values.
-- Source-controlled configuration examples should not contain private data or real player transactions.
+Glyph IDs must exist in Nexo. Plain IDs and `<glyph:id>` tags are accepted. Inline `<shift:...>` takes priority over `title-shift`; legacy `shift` and `topup-glyph` fallbacks remain supported. Normal titles use `gui.title`, `create-title`, `topup-title`, `insert-title`, and `history-title` when custom titles are disabled or rendering fails.
 
-## Licence
+### Language and branding
 
-No licence has been specified in the inspected project files. Add a `LICENSE` file if you intend to grant others permission to use, modify or redistribute the source code.
+```yaml
+branding:
+  plugin: SylvPay
+  card: Tap2Go
+messages:
+  prefix: '<gold>[SylvPay] </gold>'
+  balance: '<gray>Card <white>{id}</white> balance: <green>{balance}'
+faregates:
+  messages:
+    tap-in: '<green>Tapped into <gold>{station}</gold>'
+validators:
+  messages:
+    tap-out: '<green>Exited {station}. Fare: {fare}. Balance: {balance}'
+```
+
+These sections belong in **`lang.yml`**. Preserve the other message keys from the defaults when editing. MiniMessage formatting and message-specific placeholders are supported:
+
+- General messages use `{id}`, `{amount}`, `{balance}`, or `{max}` as appropriate.
+- Gate messages support `{station}`, `{origin}`, `{zone}`, `{origin_zone}`, `{fare}`, and `{balance}`.
+- Validator messages in the active implementation support `{station}`, `{fare}`, and `{balance}`.
+
+Branding replaces display occurrences of SylvPay and Tap2Go; it does not rename commands, internal IDs, furniture IDs, or glyph keys. GUI titles, item names, and lore remain in `config.yml`. Some GUI labels and administrative messages are still defined in Java.
+
+On upgrade, legacy message values from `config.yml` are copied into missing `lang.yml` entries. Explicit language-file values take priority, and bundled language defaults supply missing messages. `/sylvpay reload` reloads language changes; reopen an existing GUI to see updated text.
+
+### Stations and fares
+
+`stations.yml`:
+
+```yaml
+stations:
+  sylvcentral:
+    name: 'Sylvarion Central'
+    zone: 1
+  sylvairport:
+    name: 'Sylvarion Airport'
+    zone: 3
+```
+
+`fares.yml`:
+
+```yaml
+fares:
+  default-fare: 3.00
+  same-station-fare: 0.00
+  reverse-routes: true
+  maximum-journey-minutes: 180
+  minimum-entry-balance: 0.00
+  routes:
+    sylvcentral:
+      sylvairport: 5.50
+  zones:
+    1: 2.00
+    2: 3.00
+    3: 4.00
+```
+
+Fare selection order is:
+
+1. Same-station fare when origin and destination match.
+2. Explicit origin-to-destination route.
+3. Reverse route, if enabled and available.
+4. Zone price for `abs(origin zone - destination zone) + 1`.
+5. Default fare if zone information or the corresponding zone price is missing.
+
+The example Central-to-Airport journey costs 5.50 because the explicit route overrides its three-zone price. There is no separate zone-pricing enable switch; configure `fares.zones` to use it. Fares must be finite, non-negative values and are rounded to two decimal places.
+
+Tap-in checks minimum entry balance without deducting a fare. Tap-out deducts the calculated fare and records the completed journey. Insufficient funds or an expired journey leave the journey active. There is currently no journey-reset command; expired journeys require staff intervention.
+
+### Fare gates and validators
+
+```yaml
+ticket-machine:
+  furniture-id: sylv_ticket_machine
+faregates:
+  enabled: true
+  models:
+    closed: sylv_faregate_closed
+    open: sylv_faregate_open
+  tap-cooldown-ms: 1500
+  opening:
+    timeout-ticks: 100
+    clearance-radius: 0.85
+    lane-half-width: 1.0
+validators:
+  enabled: true
+  furniture-id: sylv_validator
+  tap-cooldown-ms: 1500
+```
+
+Fare gates are disabled in the default config; validators are enabled. Furniture IDs refer to Nexo furniture definitions, rather than item-model resource keys. The closed gate model must block passage and the open model must allow it; Nexo manages furniture placement and collision blocks.
+
+After defining stations and reloading, look at each furniture item and assign it:
+
+```text
+/sylvpay gate set sylvcentral entrance
+/sylvpay gate set sylvairport exit
+/sylvpay validator set sylvcentral
+```
+
+Hold a valid card in the **main hand** and right-click to tap. Entrance gates start journeys; exit gates complete them. Validators toggle between entry and exit according to whether the card already has an active journey.
+
+Gates close after the tapping player passes through, or after the configured timeout. Closing is delayed while a player occupies the barrier footprint. The default timeout is 100 ticks, approximately five seconds at 20 TPS. Tap-in and tap-out sounds are configured separately under each system's `sounds` section.
+
+Assignments retain numerical IDs across normal gate model swaps. If furniture is replaced at the same saved position, interaction can recover its registration when the old entity is absent and there is one unambiguous match within 0.1 block. Moved furniture should be reassigned manually. Gate/validator deletion commands remove registrations without removing furniture.
+
+## Troubleshooting and operational notes
+
+- **Two SylvPay entries in `/plugins`:** remove extra SylvPay JARs. Gradle `runServer` already loads the build output directly.
+- **GUI unchanged after reload:** reopen it. Changed Java code requires a new build and server restart; `/sylvpay reload` only reloads configuration.
+- **Invisible controls:** check `show-items`, per-button visibility, enabled glyphs, and the resource pack received by the player.
+- **Slots do not move:** check screen-specific keypad overrides and use slot numbers 0–53. Avoid overlapping controls and history entries.
+- **No gate response:** enable fare gates, verify the furniture IDs and assignment, and hold the card in your main hand.
+- **Gate cannot open:** verify both Nexo models exist and are configured correctly. If replacement fails after a card transaction commits, the server logs that staff must review the journey; it is not automatically reversed.
+- **Economy failure:** purchase/top-up database failures attempt a Vault reversal. Failed reversals or refund payouts are logged for manual repayment.
+- **More diagnostics:** use `/sylvpay debug on`, reproduce the issue, then `/sylvpay debug off`.
+
+Back up `cards.db`, `gates.yml`, and `validators.yml` with the server stopped before changing persistent data or upgrading. SQLite operations currently run synchronously on the server thread.
+
+## Source layout
+
+All Java classes are under `org.sylvarion.sylvpay`:
+
+| Class | Responsibility |
+| --- | --- |
+| `SylvPayMain` | Lifecycle, Vault setup, permissions, and commands. |
+| `MachineGui` | Inventory menus, card handling, purchases, top-ups, refunds, and history. |
+| `CardDatabase` | SQLite schema, balances, journey transactions, and history queries. |
+| `StationManager` | Stations and persistent numbered gate assignments. |
+| `FareManager` | Route, zone, and default fare selection. |
+| `FareGateManager` | Gate taps, opening, crossing detection, and closing. |
+| `NexoGateBridge` | Nexo interaction events, furniture targeting, and replacement. |
+| `ValidatorManager` | Validator assignments and the active validator tap flow. |
+| `ValidatorTapManager` | Separate validator tap implementation, currently not wired into startup. |
+| `LangManager` | Language loading, legacy message migration, and branding. |
+| `DebugManager` | Configurable diagnostic logging. |
