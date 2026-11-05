@@ -10,7 +10,7 @@ plugins {
 // ==========================================
 
 group = "org.sylvarion.sylvpay"
-version = "0.2.0-beta"
+version = "0.3.0-beta"
 
 base {
     archivesName.set("SylvPay")
@@ -51,7 +51,7 @@ tasks {
 
         inputs.properties(props)
 
-        filesMatching("plugin.yml") {
+        filesMatching(listOf("plugin.yml", "paper-plugin.yml")) {
             expand(props)
         }
     }
