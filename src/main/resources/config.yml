@@ -76,23 +76,31 @@ gui:
       glyph: tap2gonumpad
       title-shift: -9
   insert:
-    size: 27
     card-slot: 13
     back-slot: 22
     show-items: true
     info-slot: 11
     continue-slot: 15
   create:
+    # Slots remain clickable when their button items are hidden.
+    show-confirm-item: false
+    show-back-item: false
     slots:
       info: 13
       confirm: 33
       back: 53
   topup:
+    # Hide these items when the buttons are drawn into the GUI texture.
+    # Their configured slots remain clickable; number and info items stay visible.
+    show-confirm-item: false
+    show-back-item: false
     slots:
       info: 13
       confirm: 33
       back: 53
   history:
+    # Hide the item while keeping slots.back clickable (slots are numbered 0-53).
+    show-back-item: false
     slots:
       card-reader: 4
       previous-page: 36
@@ -176,26 +184,8 @@ card:
     - <dark_gray>Top up at any ticket machine.
   price: 2.5
   max-creation-balance: 500.0
-  buy-options:
-    - 5
-    - 10
-    - 25
-    - 50
-topup-options:
-  - 5
-  - 10
-  - 25
-  - 50
 max-balance: 1000
 buttons:
-  buy:
-    material: PAPER
-    item-model: sylvpay:tap2go_card
-    name: <gold>Buy Card <gray>(preload <green>{amount}<gray>)
-    lore:
-      - '<gray>Card: <white>{price}'
-      - '<gray>Preload: <white>{amount}'
-      - '<gray>Total: <green>{total}'
   balance:
     material: CLOCK
     item-model: ''
@@ -215,31 +205,11 @@ buttons:
     lore:
       - <gray>Takes your card and returns
       - <gray>its balance to your account.
-  topup-amount:
-    material: GOLD_INGOT
-    item-model: ''
-    name: <green>Add <white>{amount}
-    lore:
-      - <gray>Click to top up.
   back:
     material: ARROW
     item-model: ''
     name: <gray>Back
     lore: []
-messages:
-  prefix: <gold>[SylvPay] </gold>
-  no-card: <red>You don't have a SylvPay card in your inventory.
-  not-enough-money: <red>You can't afford that. You need {amount}.
-  bought: <green>Bought card <white>{id}</white> with <white>{balance}</white> preloaded.
-  balance: '<gray>Card <white>{id}</white> balance: <green>{balance}'
-  topped-up: '<green>Added <white>{amount}</white>. New balance: <white>{balance}'
-  max-balance: <red>That would exceed the max card balance of {max}.
-  refunded: <green>Card <white>{id}</white> refunded. You received <white>{amount}</white>.
-  invalid-card: <red>That card is no longer valid.
-  error: <red>Something went wrong. Tell an admin.
-  no-permission: <red>You don't have permission.
-  players-only: Only players can use this.
-  reloaded: <green>Config reloaded.
 faregates:
   enabled: false
   models:
@@ -250,7 +220,6 @@ faregates:
     timeout-ticks: 100
     clearance-radius: 0.85
     lane-half-width: 1.0
-    crossing-radius: 1.5
   sounds:
     tap-in:
       enabled: true
@@ -262,18 +231,6 @@ faregates:
       sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.0
-  messages:
-    tap-in: <green>✔ Tapped into <gold>{station}</gold>
-    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
-    no-card: <red>Hold your Tap2Go card to tap.
-    invalid-card: <red>This card is invalid.
-    already-in: <red>This card already has an active journey. Tap out first.
-    no-journey: <red>You must tap in before tapping out.
-    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
-    journey-expired: <red>Journey expired. Contact staff to resolve it.
-    busy: <yellow>This gate is in use.
-    model-missing: <red>Open gate Nexo item ID not found.
-    error: <red>Unable to process the tap. Contact staff.
 validators:
   enabled: true
   furniture-id: sylv_validator
@@ -289,13 +246,3 @@ validators:
       sound: minecraft:block.note_block.bell
       volume: 0.8
       pitch: 1.0
-  messages:
-    tap-in: <green>✔ Tapped into <gold>{station}</gold>
-    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
-    no-card: <red>Hold your Tap2Go card to tap.
-    invalid-card: <red>This card is invalid.
-    already-in: <red>This card already has an active journey.
-    no-journey: <red>No active journey found.
-    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
-    journey-expired: <red>Journey expired. Contact staff.
-    error: <red>Unable to process the tap. Contact staff.

@@ -290,7 +290,7 @@ public final class FareGateManager implements Listener {
 
     private void message(Player player, String key, String station, String origin, double fare, double balance) {
         plugin.debug().log("GATE", "Feedback: player=%s key=%s station=%s",player.getName(),key,station);
-        String template = plugin.getConfig().getString("faregates.messages." + key, "<red>Fare gate error.");
+        String template = plugin.lang().message("faregates.messages." + key, "<red>Fare gate error.");
         player.sendMessage(mm.deserialize(plugin.lang().brand(template
                 .replace("{station}", stations.stationName(station))
                 .replace("{zone}", zoneLabel(station))

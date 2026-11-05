@@ -1,5 +1,43 @@
-# SylvPay display branding. MiniMessage formatting remains in config.yml.
+# SylvPay display branding and messages. Supports MiniMessage formatting.
 # This file is created automatically on first startup if missing.
 branding:
   plugin: "SylvPay"
   card: "Tap2Go"
+
+messages:
+  prefix: <gold>[SylvPay] </gold>
+  no-card: <red>You don't have a SylvPay card in your inventory.
+  not-enough-money: <red>You can't afford that. You need {amount}.
+  bought: <green>Bought card <white>{id}</white> with <white>{balance}</white> preloaded.
+  balance: '<gray>Card <white>{id}</white> balance: <green>{balance}'
+  topped-up: '<green>Added <white>{amount}</white>. New balance: <white>{balance}'
+  max-balance: <red>That would exceed the max card balance of {max}.
+  refunded: <green>Card <white>{id}</white> refunded. You received <white>{amount}</white>.
+  invalid-card: <red>That card is no longer valid.
+  error: <red>Something went wrong. Tell an admin.
+
+faregates:
+  messages:
+    tap-in: <green>✔ Tapped into <gold>{station}</gold>
+    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
+    no-card: <red>Hold your Tap2Go card to tap.
+    invalid-card: <red>This card is invalid.
+    already-in: <red>This card already has an active journey. Tap out first.
+    no-journey: <red>You must tap in before tapping out.
+    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
+    journey-expired: <red>Journey expired. Contact staff to resolve it.
+    busy: <yellow>This gate is in use.
+    model-missing: <red>Open gate Nexo item ID not found.
+    error: <red>Unable to process the tap. Contact staff.
+
+validators:
+  messages:
+    tap-in: <green>✔ Tapped into <gold>{station}</gold>
+    tap-out: '<green>✔ Tapped out at <gold>{station}</gold>. Fare: <yellow>{fare}</yellow>. Balance: <white>{balance}'
+    no-card: <red>Hold your Tap2Go card to tap.
+    invalid-card: <red>This card is invalid.
+    already-in: <red>This card already has an active journey.
+    no-journey: <red>No active journey found.
+    insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
+    journey-expired: <red>Journey expired. Contact staff.
+    error: <red>Unable to process the tap. Contact staff.

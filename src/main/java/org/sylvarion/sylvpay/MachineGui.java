@@ -90,8 +90,8 @@ public final class MachineGui implements Listener {
     }
 
     private void msg(Player p, String key, String... pairs) {
-        String prefix = cfg().getString("messages.prefix", "");
-        String body = cfg().getString("messages." + key, key);
+        String prefix = plugin.lang().message("messages.prefix", "");
+        String body = plugin.lang().message("messages." + key, key);
         p.sendMessage(text(prefix + body, pairs));
     }
 
@@ -419,7 +419,8 @@ public final class MachineGui implements Listener {
                 plugin.getLogger().severe("History query failed: " + ex.getMessage());
                 msg(p, "error");
             }
-            inv.setItem(guiSlot("gui.history.slots.back", 40), button("back"));
+            inv.setItem(guiSlot("gui.history.slots.back", 40),
+                    cfg().getBoolean("gui.history.show-back-item", true) ? button("back") : null);
         }
         plugin.debug().log("GUI", "Opened %s: player=%s card=%s page=%d",type,p.getName(),selectedId(holder),page);
         p.openInventory(inv);
@@ -531,7 +532,8 @@ public final class MachineGui implements Listener {
         if (!cfg().getBoolean("gui.sounds.enabled", true)) return;
         ItemStack item = holder.inventory.getItem(slot);
         if ((item == null || item.getType().isAir()) && holder.type != Type.MAIN
-                && holder.type != Type.CREATE && holder.type != Type.TOPUP && holder.type != Type.INSERT) return;
+                && holder.type != Type.CREATE && holder.type != Type.TOPUP && holder.type != Type.INSERT
+                && !(holder.type == Type.HISTORY && slot == guiSlot("gui.history.slots.back", 40))) return;
 
         boolean keypad = (holder.type == Type.CREATE || holder.type == Type.TOPUP)
                 && translateKeypadSlot(holder.type, slot) >= 0;
@@ -723,14 +725,17 @@ public final class MachineGui implements Listener {
                 simple(Material.YELLOW_CONCRETE, "<yellow>Decimal point (.)")));
         items.put(keypadSlot(holder.type, "clear", SLOT_CLEAR), keypadButton("clear",
                 simple(Material.REDSTONE, "<red>Clear amount")));
-        // Confirm and Back are real movable buttons, or invisible when show-items is false.
+        // Texture buttons can stay empty without hiding the keypad items.
+        String screen = holder.type == Type.CREATE ? "create" : "topup";
         ItemStack confirm = holder.type == Type.CREATE
                 ? simple(Material.LIME_CONCRETE, "<green>Buy Tap2Go Card — " + money(round(enteredAmount(holder) + cardDeposit())),
                 "<yellow>Click to confirm purchase")
                 : simple(Material.LIME_CONCRETE, "<green>Confirm Top Up — " + money(enteredAmount(holder)),
                 "<yellow>Click to confirm payment");
-        items.put(keypadSlot(holder.type, "confirm", SLOT_CONFIRM_CREATE), confirm);
-        items.put(keypadSlot(holder.type, "back", SLOT_CREATE_BACK), button("back"));
+        if (cfg().getBoolean("gui." + screen + ".show-confirm-item", true))
+            items.put(keypadSlot(holder.type, "confirm", SLOT_CONFIRM_CREATE), confirm);
+        if (cfg().getBoolean("gui." + screen + ".show-back-item", true))
+            items.put(keypadSlot(holder.type, "back", SLOT_CREATE_BACK), button("back"));
         inv.clear();
         if (cfg().getBoolean("gui.numpad.show-items", true))
             items.forEach((index, item) -> { if (item != null) inv.setItem(index, item); });

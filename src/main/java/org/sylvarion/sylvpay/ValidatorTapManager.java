@@ -78,7 +78,7 @@ public final class ValidatorTapManager {
         return zone == null ? "Unknown" : zone.toString();
     }
     private void message(Player player, String key, String station, String origin, double fare, double balance) {
-        String template=plugin.getConfig().getString("validators.messages."+key, "<red>Validator error.");
+        String template=plugin.lang().message("validators.messages."+key, "<red>Validator error.");
         player.sendMessage(mm.deserialize(plugin.lang().brand(template
                 .replace("{station}", plugin.stations().stationName(station))
                 .replace("{origin}", origin == null ? "" : plugin.stations().stationName(origin))

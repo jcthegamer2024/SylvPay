@@ -161,7 +161,7 @@ public final class ValidatorManager {
         return cfg.getString("currency.position", "before").equalsIgnoreCase("after") ? format.format(amount)+gap+symbol : symbol+gap+format.format(amount);
     }
     private void message(Player player, String key, String station, CardDatabase.TapResult result) {
-        String content = plugin.getConfig().getString("validators.messages."+key, "<red>Validator: "+key);
+        String content = plugin.lang().message("validators.messages."+key, "<red>Validator: "+key);
         content = content.replace("{station}", plugin.stations().stationName(station))
             .replace("{fare}", money(result == null ? 0 : result.fare()))
             .replace("{balance}", money(result == null ? 0 : result.balance()));
