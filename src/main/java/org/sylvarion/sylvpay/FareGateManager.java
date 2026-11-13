@@ -12,13 +12,12 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
-import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.sql.SQLException;
 import java.util.*;
 
-/** Nexo-managed, two-furniture fare gates. */
+/** Fare gates using Nexo furniture states on a persistent base entity. */
 public final class FareGateManager implements Listener {
     private static final class OpenGate {
         ItemDisplay display;
@@ -60,7 +59,8 @@ public final class FareGateManager implements Listener {
     }
 
     private String closedId() { return plugin.getConfig().getString("faregates.models.closed", "sylv_faregate_closed"); }
-    private String openId() { return plugin.getConfig().getString("faregates.models.open", "sylv_faregate_open"); }
+    private String openState() { return plugin.getConfig().getString("faregates.states.open", "open"); }
+    private String closedState() { return plugin.getConfig().getString("faregates.states.closed", ""); }
 
     public boolean isManaged(ItemDisplay display) {
         return display != null && stations.gate(display) != null;
@@ -84,8 +84,12 @@ public final class FareGateManager implements Listener {
         long cooldown = plugin.getConfig().getLong("faregates.tap-cooldown-ms", 1500);
         if (now - lastTap.getOrDefault(player.getUniqueId(), 0L) < cooldown) {plugin.debug().log("GATE", "Tap ignored: cooldown player=%s",player.getName());return true;}
         lastTap.put(player.getUniqueId(), now);
-        if (!nexo.exists(openId()) || !nexo.exists(closedId())) {
+        if (openState().equals(closedState()) || !nexo.exists(closedId())
+                || !nexo.hasState(gate, openState()) || !nexo.hasState(gate, closedState())) {
             message(player, "model-missing", station, null, 0, 0); return true;
+        }
+        if (!nexo.isState(gate, closedState())) {
+            message(player, "busy", station, null, 0, 0); return true;
         }
         try {
             CardDatabase.TapResult result;
@@ -117,22 +121,18 @@ public final class FareGateManager implements Listener {
                 message(player, key, station, result.origin(), result.fare(), result.balance());
                 return true;
             }
-            UUID oldUuid = gate.getUniqueId();
-            Location oldPosition = gate.getLocation().clone();
-            ItemDisplay opened = nexo.replace(gate, openId());
-            if (opened == null) {
-                // Best-effort restore; journey was already recorded, so alert administrators.
-                ItemDisplay restored = nexo.place(closedId(), oldPosition);
-                if (restored != null) transferSafely(oldUuid, restored.getUniqueId());
+            if (!nexo.setState(gate, openState())) {
+                // A state failure can occur after the journey transaction has committed.
+                // Track the entity so a partially applied open state is retried closed.
+                UUID failedUuid = gate.getUniqueId();
+                open.put(failedUuid, new OpenGate(gate, player));
+                Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(failedUuid), 20L);
                 plugin.getLogger().severe("Gate failed to open AFTER card transaction for " + card +
                         ". Review the journey manually.");
                 message(player, "error", station, null, 0, 0);
                 return true;
             }
-            if (!transferSafely(oldUuid, opened.getUniqueId())) {
-                // Keep tracking in memory even if persistence fails; do not leave an open gate untracked.
-                plugin.getLogger().severe("Gate UUID assignment could not be persisted; gate " + opened.getUniqueId());
-            }
+            ItemDisplay opened = gate;
             long timeout = Math.max(20L, plugin.getConfig().getLong("faregates.opening.timeout-ticks", 100));
             UUID openUuid = opened.getUniqueId();
             OpenGate state = new OpenGate(opened, player);
@@ -148,14 +148,6 @@ public final class FareGateManager implements Listener {
             plugin.getLogger().severe("Fare gate transaction failed: " + ex);
             message(player, "error", station, null, 0, 0);
             return true;
-        }
-    }
-
-    private boolean transferSafely(UUID from, UUID to) {
-        try { stations.transfer(from, to); return true; }
-        catch (IOException | IllegalArgumentException ex) {
-            plugin.getLogger().severe("Could not transfer gate assignment: " + ex);
-            return false;
         }
     }
 
@@ -218,18 +210,11 @@ public final class FareGateManager implements Listener {
             Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 20L);
             return;
         }
-        Location location = state.display.getLocation().clone();
-        ItemDisplay closed = nexo.replace(state.display, closedId());
-        if (closed == null) {
-            // Try to restore a closed gate if Nexo removed the open one.
-            closed = nexo.place(closedId(), location);
-            if (closed == null) {
-                plugin.getLogger().severe("CRITICAL: Could not close fare gate at " + location);
-                Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 40L);
-                return;
-            }
+        if (!nexo.setState(state.display, closedState())) {
+            plugin.getLogger().severe("Could not reset fare gate state at " + state.display.getLocation());
+            Bukkit.getScheduler().runTaskLater(plugin, () -> attemptClose(openUuid), 40L);
+            return;
         }
-        transferSafely(openUuid, closed.getUniqueId());
         open.remove(openUuid);
         plugin.debug().log("GATE", "Gate closed: %s",openUuid);
     }
@@ -239,10 +224,8 @@ public final class FareGateManager implements Listener {
         for (var entry : new HashMap<>(open).entrySet()) {
             OpenGate state = entry.getValue();
             if (!state.display.isValid()) continue;
-            Location location = state.display.getLocation().clone();
-            ItemDisplay closed = nexo.replace(state.display, closedId());
-            if (closed == null) closed = nexo.place(closedId(), location);
-            if (closed != null) transferSafely(entry.getKey(), closed.getUniqueId());
+            if (!nexo.setState(state.display, closedState()))
+                plugin.getLogger().severe("Could not reset gate state during shutdown: " + entry.getKey());
         }
         open.clear();
     }

@@ -3,8 +3,6 @@ package org.sylvarion.sylvpay;
 import com.nexomc.nexo.api.NexoFurniture;
 import com.nexomc.nexo.api.events.furniture.NexoFurnitureInteractEvent;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -12,6 +10,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.inventory.EquipmentSlot;
 import java.io.IOException;
+import com.nexomc.nexo.mechanics.furniture.states.FurnitureStates;
+import com.nexomc.nexo.mechanics.furniture.FurnitureMechanic;
+import org.bukkit.persistence.PersistentDataType;
 
 /** All Nexo integration uses its published public Java API. */
 public final class NexoGateBridge implements Listener {
@@ -97,6 +98,10 @@ public final class NexoGateBridge implements Listener {
 
     public String furnitureId(ItemDisplay display) {
         if (display == null || !display.isValid()) return null;
+        // FURNITURE states can change the active mechanic. Keep resolving the original definition.
+        String baseId = display.getPersistentDataContainer().get(
+                FurnitureMechanic.Companion.getFURNITURE_KEY(), PersistentDataType.STRING);
+        if (baseId != null) return baseId;
         var mechanic = NexoFurniture.furnitureMechanic(display);
         return mechanic == null ? null : mechanic.getItemID();
     }
@@ -105,28 +110,40 @@ public final class NexoGateBridge implements Listener {
         return id != null && !id.isBlank() && NexoFurniture.isFurniture(id);
     }
 
-    /** Use Nexo removal and placement, so Nexo manages the collision blocks itself. */
-    public ItemDisplay replace(ItemDisplay previous, String replacementId) {
-        if (previous == null || !previous.isValid() || !exists(replacementId)) return null;
-        Location position = previous.getLocation().clone();
-        if (!NexoFurniture.remove(previous)) {plugin.debug().log("NEXO", "Could not remove furniture %s",previous.getUniqueId());return null;}
-        try {
-            ItemDisplay placed = NexoFurniture.place(replacementId, position, position.getYaw(), BlockFace.UP);
-            if (placed != null) {plugin.debug().log("NEXO", "Replaced furniture %s -> %s model=%s",previous.getUniqueId(),placed.getUniqueId(),replacementId);return placed;}
-        } catch (RuntimeException ex) {
-            plugin.getLogger().severe("Nexo placement failed: " + ex);
-        }
-        plugin.getLogger().severe("Furniture removed, but replacement could not be placed at " + position);
-        return null;
+    /** Both configured states must exist before any card transaction is committed. */
+    public boolean hasState(ItemDisplay display, String id) {
+        var mechanic = NexoFurniture.furnitureMechanic(furnitureId(display));
+        return mechanic != null && mechanic.getStates() != null
+                && mechanic.getStates().getStates().containsKey(id);
     }
 
-    public ItemDisplay place(String id, Location location) {
-        if (!exists(id)) return null;
+    public boolean isState(ItemDisplay display, String id) {
+        var mechanic = NexoFurniture.furnitureMechanic(furnitureId(display));
+        return mechanic != null && mechanic.getStates() != null
+                && id.equals(mechanic.getStates().currentState(display).getId());
+    }
+
+    /** Apply an explicit state using the public state/key API, without replacing the entity.
+     * Nexo's transition order is: store target ID, unset previous state, set target state.
+     */
+    public boolean setState(ItemDisplay display, String id) {
+        if (display == null || !display.isValid()) return false;
         try {
-            return NexoFurniture.place(id, location, location.getYaw(), BlockFace.UP);
+            var mechanic = NexoFurniture.furnitureMechanic(furnitureId(display));
+            if (mechanic == null || mechanic.getStates() == null) return false;
+            var states = mechanic.getStates();
+            var next = states.getStates().get(id);
+            if (next == null) return false;
+            var previous = states.currentState(display);
+            display.getPersistentDataContainer().set(FurnitureStates.Companion.getSTATE_KEY(),
+                    PersistentDataType.STRING, id);
+            previous.unsetState(display);
+            next.setState(display);
+            plugin.debug().log("NEXO", "Furniture state changed: entity=%s state=%s", display.getUniqueId(), id);
+            return true;
         } catch (RuntimeException ex) {
-            plugin.getLogger().severe("Nexo placement failed: " + ex);
-            return null;
+            plugin.getLogger().severe("Nexo state change failed for " + display.getUniqueId() + ": " + ex);
+            return false;
         }
     }
 }

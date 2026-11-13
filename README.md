@@ -1,10 +1,10 @@
-﻿# SylvPay
+# SylvPay
 
 **Tap2Go transport cards, ticket machines, fare gates, and validators for Sylvarion City.**
 
 SylvPay is a Paper Minecraft plugin that connects a persistent transport-card balance to a Vault economy. Players buy and recharge cards at ticket machines, tap into stations, and pay a journey fare when tapping out.
 
-Current version: **0.3.0-beta**.
+Current version: **0.4.0-beta**.
 
 ## Features
 
@@ -24,7 +24,7 @@ Current version: **0.3.0-beta**.
 | --- | --- |
 | Server | Paper for Minecraft 26.3 |
 | Java | Java 25 toolchain |
-| Nexo | Required; compiled against Nexo 1.29.1 |
+| Nexo | Required; compiled against Nexo 1.30.2 |
 | Vault | Required; compiled against VaultAPI 1.7 |
 | Economy provider | A registered Vault economy provider, such as CMI's economy |
 | CMI | Optional; another Vault-compatible economy provider can be used |
@@ -41,7 +41,7 @@ The build uses Paper API `26.3.build.+`; `paper-plugin.yml` declares API version
 
    This checkout does not include Gradle wrapper launch scripts.
 
-2. For a normal server, copy `build/libs/SylvPay-0.3.0-beta.jar` into `plugins/`, alongside Nexo, Vault, and an economy provider. Remove older SylvPay JARs before starting.
+2. For a normal server, copy `build/libs/SylvPay-0.4.0-beta.jar` into `plugins/`, alongside Nexo, Vault, and an economy provider. Remove older SylvPay JARs before starting.
 3. Start the server to generate `plugins/SylvPay/` and its configuration files.
 4. Configure your furniture IDs, resource pack, station definitions, fares, and GUI.
 5. Run `/sylvpay reload` after configuration edits. Restart after installing changed plugin code.
@@ -290,7 +290,9 @@ faregates:
   enabled: true
   models:
     closed: sylv_faregate_closed
-    open: sylv_faregate_open
+  states:
+    closed: ''
+    open: open
   tap-cooldown-ms: 1500
   opening:
     timeout-ticks: 100
@@ -302,7 +304,29 @@ validators:
   tap-cooldown-ms: 1500
 ```
 
-Fare gates are disabled in the default config; validators are enabled. Furniture IDs refer to Nexo furniture definitions, rather than item-model resource keys. The closed gate model must block passage and the open model must allow it; Nexo manages furniture placement and collision blocks.
+Fare gates are disabled in the default config; validators are enabled. Furniture IDs refer to Nexo furniture definitions, rather than item-model resource keys. The base furniture must define Nexo states that change both appearance and collision. SylvPay changes states on the same entity; it no longer removes and replaces furniture to open or close a gate.
+
+`faregates.models.closed` is the base furniture ID, retained for existing configurations. `faregates.models.open` is no longer used. `faregates.states.closed: ''` selects Nexo's implicit base state; `open: open` selects the named `open` state. Install Nexo 1.30.2 or a compatible fixed build before testing.
+
+For the Nexo furniture definition, merge an open state into your existing closed gate. For example (replace the model key and use your existing closed hitbox):
+
+```yaml
+# Inside your existing Nexo item's Mechanics.furniture section:
+hitbox:
+  barriers:
+    - 0,0,0
+states:
+  condition: "false"
+  open:
+    type: FURNITURE
+    item_model: sylvpay:sylv_faregate_open
+    hitbox:
+      barriers: []
+```
+
+Use `FURNITURE`, rather than a visual-only `ITEM_MODEL` state, so the open state removes the blocking barriers. Preserve any interaction hitbox needed for tapping. `condition: "false"` prevents Nexo's normal player-click state cycling; SylvPay explicitly changes states only after card validation. Do not configure Nexo `next_after` or `reset_after` timers for these gates: SylvPay controls closing and passenger clearance. See [Nexo furniture states](https://docs.nexomc.com/mechanics/furniture-mechanic/furniture-states) for the state configuration format.
+
+Existing placed furniture may need refreshing or replacing after updating its Nexo definition; do not delete `gates.yml`. Test the closed collision, authorised opening, crossing, timeout, and closing before using the gates with passengers.
 
 After defining stations and reloading, look at each furniture item and assign it:
 
@@ -316,7 +340,7 @@ Hold a valid card in the **main hand** and right-click to tap. Entrance gates st
 
 Gates close after the tapping player passes through, or after the configured timeout. Closing is delayed while a player occupies the barrier footprint. The default timeout is 100 ticks, approximately five seconds at 20 TPS. Tap-in and tap-out sounds are configured separately under each system's `sounds` section.
 
-Assignments retain numerical IDs across normal gate model swaps. If furniture is replaced at the same saved position, interaction can recover its registration when the old entity is absent and there is one unambiguous match within 0.1 block. Moved furniture should be reassigned manually. Gate/validator deletion commands remove registrations without removing furniture.
+Gate state changes preserve the same entity UUID, assignment, and numerical ID. If furniture is replaced at the same saved position, interaction can recover its registration when the old entity is absent and there is one unambiguous match within 0.1 block. Moved furniture should be reassigned manually. Gate/validator deletion commands remove registrations without removing furniture.
 
 ## Troubleshooting and operational notes
 
@@ -325,7 +349,7 @@ Assignments retain numerical IDs across normal gate model swaps. If furniture is
 - **Invisible controls:** check `show-items`, per-button visibility, enabled glyphs, and the resource pack received by the player.
 - **Slots do not move:** check screen-specific keypad overrides and use slot numbers 0–53. Avoid overlapping controls and history entries.
 - **No gate response:** enable fare gates, verify the furniture IDs and assignment, and hold the card in your main hand.
-- **Gate cannot open:** verify both Nexo models exist and are configured correctly. If replacement fails after a card transaction commits, the server logs that staff must review the journey; it is not automatically reversed.
+- **Gate cannot open:** verify the base Nexo furniture and both configured state IDs exist. If a state change fails after a card transaction commits, the server logs that staff must review the journey; it is not automatically reversed.
 - **Economy failure:** purchase/top-up database failures attempt a Vault reversal. Failed reversals or refund payouts are logged for manual repayment.
 - **More diagnostics:** use `/sylvpay debug on`, reproduce the issue, then `/sylvpay debug off`.
 
@@ -343,7 +367,7 @@ All Java classes are under `org.sylvarion.sylvpay`:
 | `StationManager` | Stations and persistent numbered gate assignments. |
 | `FareManager` | Route, zone, and default fare selection. |
 | `FareGateManager` | Gate taps, opening, crossing detection, and closing. |
-| `NexoGateBridge` | Nexo interaction events, furniture targeting, and replacement. |
+| `NexoGateBridge` | Nexo interaction events, furniture targeting, and explicit state changes. |
 | `ValidatorManager` | Validator assignments and the active validator tap flow. |
 | `ValidatorTapManager` | Separate validator tap implementation, currently not wired into startup. |
 | `LangManager` | Language loading, legacy message migration, and branding. |

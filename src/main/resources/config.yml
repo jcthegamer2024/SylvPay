@@ -214,7 +214,10 @@ faregates:
   enabled: false
   models:
     closed: sylv_faregate_closed
-    open: sylv_faregate_open
+  # Nexo state IDs on the base furniture above; an empty ID means the base state.
+  states:
+    closed: ''
+    open: open
   tap-cooldown-ms: 1500
   opening:
     timeout-ticks: 100

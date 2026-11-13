@@ -10,7 +10,7 @@ plugins {
 // ==========================================
 
 group = "org.sylvarion.sylvpay"
-version = "0.3.0-beta"
+version = "0.4.0-beta"
 
 base {
     archivesName.set("SylvPay")
@@ -33,7 +33,7 @@ dependencies {
     }
 
     // Official Nexo API
-    compileOnly("com.nexomc:nexo:1.29.1")
+    compileOnly("com.nexomc:nexo:1.30.2")
 }
 
 java {

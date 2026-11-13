@@ -27,7 +27,7 @@ faregates:
     insufficient-balance: '<red>Insufficient card balance. Balance: {balance}'
     journey-expired: <red>Journey expired. Contact staff to resolve it.
     busy: <yellow>This gate is in use.
-    model-missing: <red>Open gate Nexo item ID not found.
+    model-missing: <red>Gate furniture or configured Nexo states are missing or invalid.
     error: <red>Unable to process the tap. Contact staff.
 
 validators:
